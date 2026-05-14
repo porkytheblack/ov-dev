@@ -21,7 +21,9 @@ COPY services/ov-stream-gateway ./services/ov-stream-gateway
 FROM node:20-alpine AS runtime
 WORKDIR /app
 RUN corepack enable
-RUN apk add --no-cache ca-certificates
+# ffmpeg is required by mediamtx's runOnDemand transcoding (HEVC → H.264 for
+# browser-playable HLS).
+RUN apk add --no-cache ca-certificates ffmpeg
 COPY --from=mediamtx-src /mediamtx /usr/local/bin/mediamtx
 COPY --from=build /app /app
 WORKDIR /app/services/ov-stream-gateway

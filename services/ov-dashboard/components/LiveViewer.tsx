@@ -1,43 +1,57 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Hls from "hls.js";
 
 /**
- * Live view: snapshot polled every 2s as a baseline, with bbox overlays drawn
- * on a <canvas> aligned to the image. WebRTC is left as a future hookup —
- * the snapshot path works without WebRTC infrastructure for first-light demos.
+ * Live view: LL-HLS via the stream-gateway (mediamtx transcodes HEVC→H.264 on
+ * demand). hls.js drives Chrome/Firefox via MSE; Safari uses the native HLS
+ * pipeline. Bbox overlays still come from the WebSocket /events stream and
+ * paint a transparent canvas over the <video>.
  */
 export function LiveViewer({ cameraId }: { cameraId: string }) {
-  const imgRef = useRef<HTMLImageElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [boxes, setBoxes] = useState(true);
   const [latest, setLatest] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const url = `/api/cameras/${cameraId}/snapshot`;
-    let cancelled = false;
-    let timer: number | undefined;
+    const video = videoRef.current;
+    if (!video) return;
+    const src = `/stream/${cameraId}/hls/index.m3u8`;
+    let hls: Hls | null = null;
+    setError(null);
 
-    // Preload each frame off-screen and only swap into the visible <img> once
-    // the bytes are decoded. Without this the polling interval flashes a blank
-    // frame between fetches.
-    const tick = () => {
-      const next = new Image();
-      const finish = () => {
-        if (cancelled) return;
-        if (imgRef.current && next.complete && next.naturalWidth > 0) {
-          imgRef.current.src = next.src;
+    const useNative = video.canPlayType("application/vnd.apple.mpegurl");
+    if (useNative) {
+      video.src = src;
+      video.play().catch(() => {/* autoplay blocked; user gesture needed */});
+    } else if (Hls.isSupported()) {
+      hls = new Hls({
+        lowLatencyMode: true,
+        liveDurationInfinity: true,
+        backBufferLength: 4,
+        // mediamtx publishes LL-HLS parts ~100ms; keep playback close to live.
+        liveSyncDurationCount: 1,
+        liveMaxLatencyDurationCount: 5,
+      });
+      hls.loadSource(src);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.ERROR, (_e, data) => {
+        if (data.fatal) {
+          setError(`${data.type}: ${data.details}`);
+          hls?.destroy();
         }
-        timer = window.setTimeout(tick, 250);
-      };
-      next.onload = finish;
-      next.onerror = finish;
-      next.src = `${url}?t=${Date.now()}`;
-    };
-    tick();
+      });
+      video.play().catch(() => {/* autoplay blocked */});
+    } else {
+      setError("HLS not supported in this browser");
+    }
     return () => {
-      cancelled = true;
-      if (timer) window.clearTimeout(timer);
+      hls?.destroy();
+      video.removeAttribute("src");
+      video.load();
     };
   }, [cameraId]);
 
@@ -67,10 +81,10 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    const img = imgRef.current;
-    if (!canvas || !img) return;
-    const w = img.naturalWidth || img.clientWidth;
-    const h = img.naturalHeight || img.clientHeight;
+    const video = videoRef.current;
+    if (!canvas || !video) return;
+    const w = video.videoWidth || video.clientWidth;
+    const h = video.videoHeight || video.clientHeight;
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext("2d");
@@ -102,9 +116,19 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
         </button>
       </div>
       <div className="relative bg-black">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img ref={imgRef} alt="live" className="block w-full h-auto" />
+        <video
+          ref={videoRef}
+          muted
+          autoPlay
+          playsInline
+          className="block w-full h-auto"
+        />
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
+        {error && (
+          <div className="absolute inset-x-0 bottom-0 px-3 py-2 mono text-[11px] bg-black/70 text-danger">
+            stream error: {error}
+          </div>
+        )}
       </div>
     </div>
   );

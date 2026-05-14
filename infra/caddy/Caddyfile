@@ -19,9 +19,13 @@
     reverse_proxy ov-api:3001
   }
 
-  # Live video / stream gateway
+  # Live video / stream gateway. The gateway is on :8989 and proxies LL-HLS
+  # + WHEP from mediamtx (which listens internally on 8888/8889). The buffer
+  # must be off so LL-HLS partial segments stream out as they're produced.
   handle /stream/* {
-    reverse_proxy ov-stream-gateway:8889
+    reverse_proxy ov-stream-gateway:8989 {
+      flush_interval -1
+    }
   }
 
   # WhatsApp webhook
