@@ -15,12 +15,30 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
 
   useEffect(() => {
     const url = `/api/cameras/${cameraId}/snapshot`;
+    let cancelled = false;
+    let timer: number | undefined;
+
+    // Preload each frame off-screen and only swap into the visible <img> once
+    // the bytes are decoded. Without this the polling interval flashes a blank
+    // frame between fetches.
     const tick = () => {
-      if (imgRef.current) imgRef.current.src = `${url}?t=${Date.now()}`;
+      const next = new Image();
+      const finish = () => {
+        if (cancelled) return;
+        if (imgRef.current && next.complete && next.naturalWidth > 0) {
+          imgRef.current.src = next.src;
+        }
+        timer = window.setTimeout(tick, 250);
+      };
+      next.onload = finish;
+      next.onerror = finish;
+      next.src = `${url}?t=${Date.now()}`;
     };
     tick();
-    const i = setInterval(tick, 2000);
-    return () => clearInterval(i);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
   }, [cameraId]);
 
   useEffect(() => {
