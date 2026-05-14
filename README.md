@@ -95,6 +95,20 @@ Inbound WhatsApp webhooks are served at `http://<your-host>/webhook/whatsapp`
 - `infra/` — Postgres init, Redis config, Caddyfile.
 - `scripts/` — `seed.ts`, `reset-password.ts`, `e2e.sh`, `gen-schemas.sh`.
 
+## GPU vs CPU detector
+
+The `ov-detector` image installs **CPU-only PyTorch** by default to keep
+the image small (avoids 2GB+ of CUDA wheels). For a GPU build, override
+the torch index at build time:
+
+```bash
+docker compose build \
+  --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu121 \
+  ov-detector
+```
+
+Set `DEVICE=cuda:0` in `.env` to actually run on the GPU.
+
 ## Troubleshooting
 
 - **Detector skips frames / no incidents fire.** Check
