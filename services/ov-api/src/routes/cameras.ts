@@ -82,33 +82,62 @@ export function makeCameraRoutes(sql: ReturnType<typeof postgres>) {
 
   // Probe the camera's RTSP URL via the ingestor (which has ffprobe). Optional
   // `rtsp_url` body lets the dashboard test an unsaved URL before writing it.
+  // Every code path returns JSON so the dashboard never sees an empty body.
   app.post("/:id/test", async (c) => {
-    const id = c.req.param("id");
-    let body: { rtsp_url?: string } = {};
     try {
-      body = (await c.req.json()) ?? {};
-    } catch {
-      /* empty body is fine */
-    }
-    let rtspUrl = body.rtsp_url;
-    if (!rtspUrl) {
-      const rows = await sql<Array<{ rtspUrl: string }>>`
-        SELECT rtsp_url AS "rtspUrl" FROM cameras WHERE id = ${id}::uuid
-      `;
-      if (!rows[0]) return c.json({ error: "camera not found" }, 404);
-      rtspUrl = rows[0].rtspUrl;
-    }
-    const ingestor = process.env.INGESTOR_URL ?? "http://ov-ingestor:8000";
-    try {
-      const r = await fetch(`${ingestor}/probe`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ rtsp_url: rtspUrl, timeout_seconds: 10 }),
-      });
-      const data = (await r.json()) as { ok: boolean; error?: string; info?: unknown };
-      return c.json(data, r.ok ? 200 : 502);
+      const id = c.req.param("id");
+      let body: { rtsp_url?: string } = {};
+      try {
+        body = (await c.req.json().catch(() => ({}))) as { rtsp_url?: string };
+      } catch {
+        body = {};
+      }
+      let rtspUrl = body.rtsp_url;
+      if (!rtspUrl) {
+        const rows = await sql<Array<{ rtspUrl: string }>>`
+          SELECT rtsp_url AS "rtspUrl" FROM cameras WHERE id = ${id}::uuid
+        `;
+        if (!rows[0]) return c.json({ ok: false, error: "camera not found" }, 404);
+        rtspUrl = rows[0].rtspUrl;
+      }
+      if (!rtspUrl || !rtspUrl.trim()) {
+        return c.json({ ok: false, error: "rtsp_url is empty" }, 400);
+      }
+      const ingestor = process.env.INGESTOR_URL ?? "http://ov-ingestor:8000";
+      let resp: Response;
+      try {
+        resp = await fetch(`${ingestor}/probe`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ rtsp_url: rtspUrl, timeout_seconds: 10 }),
+        });
+      } catch (e) {
+        return c.json(
+          { ok: false, error: `ingestor unreachable: ${(e as Error).message}` },
+          502,
+        );
+      }
+      const text = await resp.text();
+      let data: { ok?: boolean; error?: string; info?: unknown } | null = null;
+      try {
+        data = text ? (JSON.parse(text) as typeof data) : null;
+      } catch {
+        /* non-JSON */
+      }
+      if (!data || typeof data !== "object") {
+        return c.json(
+          {
+            ok: false,
+            error: `ingestor HTTP ${resp.status}${
+              text ? `: ${text.slice(0, 240)}` : ""
+            }`,
+          },
+          502,
+        );
+      }
+      return c.json(data, resp.ok ? 200 : 502);
     } catch (e) {
-      return c.json({ ok: false, error: `ingestor unreachable: ${(e as Error).message}` }, 502);
+      return c.json({ ok: false, error: (e as Error).message }, 500);
     }
   });
 

@@ -108,8 +108,23 @@ export default function SetupPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ rtsp_url: camRtsp.trim() }),
       });
-      const data = await r.json();
-      setTestResult(data);
+      const text = await r.text();
+      let data: any = null;
+      if (text) {
+        try { data = JSON.parse(text); } catch { /* not JSON */ }
+      }
+      if (data && typeof data === "object" && "ok" in data) {
+        setTestResult(data);
+      } else if (data && typeof data === "object" && data.error) {
+        setTestResult({ ok: false, error: String(data.error) });
+      } else {
+        setTestResult({
+          ok: false,
+          error: `HTTP ${r.status}${
+            text ? `: ${text.slice(0, 240)}` : " (empty response — is ov-api rebuilt?)"
+          }`,
+        });
+      }
     } catch (e) {
       setTestResult({ ok: false, error: (e as Error).message });
     } finally {
