@@ -38,7 +38,7 @@ export const cameras = pgTable("cameras", {
   frameHeight: integer("frame_height"),
   frameContext: jsonb("frame_context").notNull().default(sql`'{}'::jsonb`),
   vlmEnabled: boolean("vlm_enabled").notNull().default(false),
-  sampleFps: integer("sample_fps").notNull().default(5),
+  sampleFps: integer("sample_fps").notNull().default(25),
   status: text("status").notNull().default("connecting"),
   lastFrameAt: timestamp("last_frame_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -51,6 +51,7 @@ export const rois = pgTable("rois", {
     .notNull()
     .references(() => cameras.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
+  description: text("description").notNull().default(""),
   polygon: jsonb("polygon").notNull(),
   classesOfInterest: text("classes_of_interest").array().notNull(),
   matchMode: text("match_mode").notNull().default("centroid"),

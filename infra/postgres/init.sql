@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS cameras (
   frame_height INT,
   frame_context JSONB NOT NULL DEFAULT '{}'::jsonb,
   vlm_enabled BOOLEAN NOT NULL DEFAULT false,
-  sample_fps INT NOT NULL DEFAULT 5,
+  sample_fps INT NOT NULL DEFAULT 25,
   status TEXT NOT NULL DEFAULT 'connecting',
   last_frame_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS rois (
   id UUID PRIMARY KEY,
   camera_id UUID NOT NULL REFERENCES cameras(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
   polygon JSONB NOT NULL,
   classes_of_interest TEXT[] NOT NULL,
   match_mode TEXT NOT NULL DEFAULT 'centroid',
@@ -196,3 +197,9 @@ DROP TRIGGER IF EXISTS camera_change_trigger ON cameras;
 CREATE TRIGGER camera_change_trigger
   AFTER INSERT OR UPDATE OR DELETE ON cameras
   FOR EACH ROW EXECUTE FUNCTION notify_camera_change();
+
+-- ============================================================================
+-- Idempotent migrations. Postgres only runs this file on first init, but
+-- `make migrate` re-pipes it so existing volumes pick up new columns.
+-- ============================================================================
+ALTER TABLE rois ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';

@@ -103,7 +103,9 @@ services:
     restart: unless-stopped
     networks: [overwatch]
     env_file: [.env]
-    profiles: ["vlm"]
+    # No longer profile-gated; the service idles until a camera with
+    # vlm_enabled = true produces an incident clip. Without a reachable
+    # VLM_ENDPOINT it just logs warnings and marks summary_status=failed.
     depends_on:
       redis: { condition: service_healthy }
       postgres: { condition: service_healthy }

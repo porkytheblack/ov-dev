@@ -44,9 +44,11 @@ async def _get_incident_context(incident_id: str) -> dict | None:
             await cur.execute(
                 """
                 SELECT i.id, i.camera_id, i.classes, i.opened_at, i.closed_at,
-                       c.vlm_enabled, c.frame_context
+                       c.vlm_enabled, c.frame_context, c.name AS camera_name,
+                       r.name AS roi_name, r.description AS roi_description
                   FROM incidents i
                   JOIN cameras c ON c.id = i.camera_id
+                  JOIN rois r    ON r.id = i.roi_id
                  WHERE i.id = %s
                 """,
                 (incident_id,),
@@ -54,7 +56,11 @@ async def _get_incident_context(incident_id: str) -> dict | None:
             row = await cur.fetchone()
             if not row:
                 return None
-            (iid, camera_id, classes, opened_at, closed_at, vlm_enabled, frame_context) = row
+            (
+                iid, camera_id, classes, opened_at, closed_at,
+                vlm_enabled, frame_context, camera_name,
+                roi_name, roi_description,
+            ) = row
             if not vlm_enabled:
                 return None
             duration = 0.0
@@ -66,6 +72,9 @@ async def _get_incident_context(incident_id: str) -> dict | None:
                 "classes": classes or [],
                 "duration_seconds": duration,
                 "frame_context": frame_context or {},
+                "camera_name": camera_name or "",
+                "roi_name": roi_name or "",
+                "roi_description": roi_description or "",
             }
 
 
@@ -133,11 +142,21 @@ async def _call_vlm(prompt: str, image_bytes_list: list[bytes]) -> str:
 
 
 def _build_prompt(ctx: dict) -> str:
-    description = ctx.get("frame_context", {}).get("description", "")
+    camera_desc = (ctx.get("frame_context") or {}).get("description", "")
+    roi_desc = ctx.get("roi_description") or ""
+    camera_name = ctx.get("camera_name") or "the camera"
+    roi_name = ctx.get("roi_name") or "the region"
     classes = ", ".join(ctx.get("classes", []))
+    scene_lines = []
+    if camera_desc:
+        scene_lines.append(f"Camera ({camera_name}) scene: {camera_desc}")
+    if roi_desc:
+        scene_lines.append(f"ROI ({roi_name}): {roi_desc}")
+    scene = "\n".join(scene_lines) or f"Scene context not provided. ROI: {roi_name}."
     return (
         "You are summarizing a security incident clip. "
-        f"Context about this camera's scene: {description or 'unknown scene'}. "
+        "Focus on what happens inside the ROI; ignore activity elsewhere in the frame.\n\n"
+        f"{scene}\n"
         f"Detected classes: {classes}. "
         f"Incident duration: {ctx.get('duration_seconds', 0):.0f}s.\n\n"
         "Describe what is happening in 1-2 sentences. Be specific and factual. "

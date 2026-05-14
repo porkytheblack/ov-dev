@@ -24,6 +24,7 @@ const detectionWindow = z.union([
 
 const roiInput = z.object({
   name: z.string().min(1),
+  description: z.string().default(""),
   polygon: polygonSchema,
   classes_of_interest: z.array(z.string()).min(1),
   match_mode: z.enum(["centroid", "iou"]).default("centroid"),
@@ -39,8 +40,9 @@ export function makeRoiRoutes(sql: ReturnType<typeof postgres>) {
   cameraScoped.get("/", async (c) => {
     const cameraId = c.req.param("id") as string;
     const rows = await sql<any[]>`
-      SELECT id, camera_id, name, polygon, classes_of_interest, match_mode,
-             detection_window, linger_threshold_seconds, notify_enabled, created_at
+      SELECT id, camera_id, name, description, polygon, classes_of_interest,
+             match_mode, detection_window, linger_threshold_seconds,
+             notify_enabled, created_at
         FROM rois WHERE camera_id = ${cameraId}::uuid ORDER BY created_at
     `;
     return c.json({ rois: rows });
@@ -52,10 +54,10 @@ export function makeRoiRoutes(sql: ReturnType<typeof postgres>) {
     const id = uuid();
     await sql`
       INSERT INTO rois
-        (id, camera_id, name, polygon, classes_of_interest, match_mode,
-         detection_window, linger_threshold_seconds, notify_enabled)
+        (id, camera_id, name, description, polygon, classes_of_interest,
+         match_mode, detection_window, linger_threshold_seconds, notify_enabled)
       VALUES (
-        ${id}, ${cameraId}::uuid, ${b.name},
+        ${id}, ${cameraId}::uuid, ${b.name}, ${b.description ?? ""},
         ${JSON.stringify(b.polygon)}::jsonb,
         ${b.classes_of_interest as unknown as string[]}::text[],
         ${b.match_mode},
@@ -72,6 +74,7 @@ export function makeRoiRoutes(sql: ReturnType<typeof postgres>) {
     const b = c.req.valid("json");
     const updates: any[] = [];
     if (b.name !== undefined) updates.push(sql`name = ${b.name}`);
+    if (b.description !== undefined) updates.push(sql`description = ${b.description}`);
     if (b.polygon !== undefined) updates.push(sql`polygon = ${JSON.stringify(b.polygon)}::jsonb`);
     if (b.classes_of_interest !== undefined)
       updates.push(sql`classes_of_interest = ${b.classes_of_interest as unknown as string[]}::text[]`);

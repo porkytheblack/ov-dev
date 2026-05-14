@@ -16,7 +16,7 @@ reset:
 	docker compose down -v
 
 migrate:
-	@echo "Migrations are baked into infra/postgres/init.sql; re-run with: make reset && make up"
+	docker compose exec -T postgres psql -U overwatch -d overwatch -v ON_ERROR_STOP=1 < infra/postgres/init.sql
 
 codegen:
 	tsx packages/schemas/build.ts

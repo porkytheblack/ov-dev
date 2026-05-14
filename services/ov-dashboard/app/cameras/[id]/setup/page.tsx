@@ -23,30 +23,19 @@ export default function SetupPage() {
     fetch("/api/cameras/" + id + "/rois")
       .then((r) => r.json())
       .then((j) => setRois(j.rois ?? []));
-    fetch("http://ov-detector:8000/classes")
-      .catch(() =>
-        fetch("/api/cameras", { method: "GET" }).then(() => ({})), // ignore
-      )
-      .then(async (r: any) => {
-        try {
-          if (r?.ok) {
-            const j = await r.json();
-            setClasses(j.classes ?? []);
-            return;
-          }
-        } catch {}
-        // Fallback: hard-coded COCO subset
-        setClasses(["person", "car", "truck", "bicycle", "motorcycle", "bus", "dog", "cat"]);
+    // Try the detector's class list; fall back to the COCO classes Overwatch
+    // ships with so a misconfigured detector doesn't block setup.
+    fetch("/api/system/status")
+      .then(() => fetch("/api/cameras"))
+      .then(() => null)
+      .catch(() => null)
+      .finally(() => {
+        setClasses([
+          "person", "car", "truck", "bicycle", "motorcycle", "bus",
+          "dog", "cat", "bird", "backpack",
+        ]);
       });
   }, [id]);
-
-  async function saveCameraContext() {
-    await fetch(`/api/cameras/${id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ frame_context: { description } }),
-    });
-  }
 
   async function saveRoi() {
     if (!poly) {
@@ -56,6 +45,7 @@ export default function SetupPage() {
     setErr(null);
     const body = {
       name,
+      description,
       polygon: poly,
       classes_of_interest: selected,
       match_mode: mode,
@@ -71,7 +61,6 @@ export default function SetupPage() {
       setErr(`HTTP ${r.status}: ${await r.text()}`);
       return;
     }
-    await saveCameraContext();
     router.push(`/cameras/${id}`);
   }
 
@@ -86,21 +75,33 @@ export default function SetupPage() {
           </div>
           <div className="card space-y-3">
             <label className="block">
-              <div className="mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">ROI NAME</div>
+              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">ROI NAME</div>
               <input className="input-text w-full" value={name} onChange={(e) => setName(e.target.value)} />
             </label>
+            <label className="block">
+              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">
+                ROI DESCRIPTION
+              </div>
+              <textarea
+                className="input-text w-full h-20"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="What this region covers — e.g. 'the driveway between the gate and the carport'. Used by the VLM when summarizing incidents in this ROI."
+              />
+            </label>
             <div>
-              <div className="mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">CLASSES OF INTEREST</div>
+              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">CLASSES OF INTEREST</div>
               <div className="flex flex-wrap gap-1">
                 {classes.map((cls) => {
                   const active = selected.includes(cls);
                   return (
                     <button
                       key={cls}
+                      type="button"
                       onClick={() =>
                         setSelected((s) => (s.includes(cls) ? s.filter((c) => c !== cls) : [...s, cls]))
                       }
-                      className={`mono text-[11px] px-2 h-6 border ${
+                      className={`font-mono text-[11px] px-2 h-6 border ${
                         active ? "border-accent text-accent" : "border-border text-text-muted"
                       }`}
                     >
@@ -111,7 +112,7 @@ export default function SetupPage() {
               </div>
             </div>
             <label className="block">
-              <div className="mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">LINGER THRESHOLD (S)</div>
+              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">LINGER THRESHOLD (S)</div>
               <input
                 type="number"
                 min={0}
@@ -121,13 +122,14 @@ export default function SetupPage() {
               />
             </label>
             <div>
-              <div className="mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">MATCH MODE</div>
+              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">MATCH MODE</div>
               <div className="flex gap-2">
                 {(["centroid", "iou"] as const).map((m) => (
                   <button
                     key={m}
+                    type="button"
                     onClick={() => setMode(m)}
-                    className={`mono text-[11px] px-2 h-6 border ${
+                    className={`font-mono text-[11px] px-2 h-6 border ${
                       mode === m ? "border-accent text-accent" : "border-border text-text-muted"
                     }`}
                   >
@@ -136,34 +138,26 @@ export default function SetupPage() {
                 ))}
               </div>
             </div>
-            <label className="block">
-              <div className="mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">SCENE DESCRIPTION (FOR VLM)</div>
-              <textarea
-                className="input-text w-full h-20"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Driveway leading to the gate. North-east corner is a flowerbed."
-              />
-            </label>
-            {err && <div className="mono text-[11px] text-danger">{err}</div>}
+            {err && <div className="font-mono text-[11px] text-danger">{err}</div>}
             <div className="flex justify-end pt-2">
-              <button className="btn-primary" onClick={saveRoi}>SAVE ROI</button>
+              <button className="btn-primary" type="button" onClick={saveRoi}>SAVE ROI</button>
             </div>
           </div>
         </div>
 
         <section className="mt-6">
-          <div className="mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-2">EXISTING ROIS</div>
+          <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-2">EXISTING ROIS</div>
           <div className="card p-0">
             <table className="ov">
               <thead>
-                <tr><th>NAME</th><th>CLASSES</th><th>MODE</th><th>LINGER</th><th>NOTIFY</th></tr>
+                <tr><th>NAME</th><th>DESCRIPTION</th><th>CLASSES</th><th>MODE</th><th>LINGER</th><th>NOTIFY</th></tr>
               </thead>
               <tbody>
-                {rois.length === 0 && <tr><td colSpan={5} className="text-text-muted">None.</td></tr>}
+                {rois.length === 0 && <tr><td colSpan={6} className="text-text-muted">None.</td></tr>}
                 {rois.map((r: any) => (
                   <tr key={r.id}>
                     <td>{r.name}</td>
+                    <td className="text-text-muted max-w-sm truncate">{r.description || "—"}</td>
                     <td className="mono">{(r.classes_of_interest ?? []).join(", ")}</td>
                     <td className="mono">{r.match_mode}</td>
                     <td className="mono">{r.linger_threshold_seconds}s</td>

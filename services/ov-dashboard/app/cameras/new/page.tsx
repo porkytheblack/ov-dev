@@ -8,7 +8,9 @@ export default function NewCameraPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [rtsp, setRtsp] = useState("");
-  const [fps, setFps] = useState(5);
+  // Default 25 fps — HikVision (and most PAL-region IP cameras) push 25 fps
+  // by default; NTSC pushes 30. Adjust per camera.
+  const [fps, setFps] = useState(25);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -59,15 +61,18 @@ export default function NewCameraPage() {
             />
           </label>
           <label className="block">
-            <div className="mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">SAMPLE FPS</div>
+            <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">SAMPLE FPS</div>
             <input
               className="input w-32"
               type="number"
               min={1}
-              max={30}
+              max={60}
               value={fps}
               onChange={(e) => setFps(Number(e.target.value))}
             />
+            <div className="font-mono text-[10px] text-text-dim mt-1">
+              25 for HikVision / most PAL cameras · 30 for NTSC · lower (5–10) saves CPU
+            </div>
           </label>
           {err && <div className="mono text-[11px] text-danger">{err}</div>}
           <div className="flex justify-end gap-2 pt-2">
