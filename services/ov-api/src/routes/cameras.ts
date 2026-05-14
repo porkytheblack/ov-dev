@@ -3,11 +3,38 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { v4 as uuid } from "uuid";
 import postgres from "postgres";
-import { BUCKETS, makeMinio } from "@overwatch/shared-ts";
+import { BUCKETS, makeMinio, makeRedis } from "@overwatch/shared-ts";
 
 export function makeCameraRoutes(sql: ReturnType<typeof postgres>) {
   const app = new Hono();
   const minio = makeMinio();
+  const redis = makeRedis();
+
+  // Best-effort recursive object delete by prefix. MinIO listObjectsV2 yields
+  // streams; removeObjects accepts batches of up to 1000.
+  async function purgePrefix(bucket: string, prefix: string): Promise<number> {
+    let removed = 0;
+    let batch: string[] = [];
+    const flush = async () => {
+      if (batch.length === 0) return;
+      await new Promise<void>((resolve) => {
+        minio
+          .removeObjects(bucket, batch)
+          .then(() => resolve())
+          .catch(() => resolve());
+      });
+      removed += batch.length;
+      batch = [];
+    };
+    const stream = minio.listObjectsV2(bucket, prefix, true);
+    for await (const obj of stream) {
+      if (!obj.name) continue;
+      batch.push(obj.name);
+      if (batch.length >= 1000) await flush();
+    }
+    await flush();
+    return removed;
+  }
 
   const cameraInput = z.object({
     name: z.string().min(1),
@@ -76,8 +103,66 @@ export function makeCameraRoutes(sql: ReturnType<typeof postgres>) {
 
   app.delete("/:id", async (c) => {
     const id = c.req.param("id");
-    await sql`DELETE FROM cameras WHERE id = ${id}::uuid`;
-    return c.json({ ok: true });
+
+    // Collect clip keys before CASCADE: storage_keys / poster_keys aren't
+    // under a per-camera prefix in the clips bucket, so we must enumerate
+    // them from Postgres while the rows still exist.
+    const clipRows = await sql<Array<{ storage_key: string; poster_key: string | null }>>`
+      SELECT storage_key, poster_key
+        FROM clips
+       WHERE camera_id = ${id}::uuid
+    `;
+
+    const result = await sql<Array<{ id: string }>>`
+      DELETE FROM cameras WHERE id = ${id}::uuid RETURNING id
+    `;
+    if (result.length === 0) return c.json({ error: "not found" }, 404);
+
+    let segmentsRemoved = 0;
+    let framesRemoved = 0;
+    let clipObjectsRemoved = 0;
+    try {
+      segmentsRemoved = await purgePrefix(BUCKETS.segments, `segments/${id}/`);
+    } catch {
+      /* tolerate */
+    }
+    try {
+      framesRemoved = await purgePrefix(BUCKETS.frames, `frames/${id}/`);
+    } catch {
+      /* tolerate */
+    }
+    // Delete individual clip artifacts (storage_key + poster_key) in bulk.
+    if (clipRows.length > 0) {
+      const keys = clipRows
+        .flatMap((r) => [r.storage_key, r.poster_key])
+        .filter((k): k is string => !!k);
+      for (let i = 0; i < keys.length; i += 1000) {
+        const batch = keys.slice(i, i + 1000);
+        await new Promise<void>((resolve) => {
+          minio
+            .removeObjects(BUCKETS.clips, batch)
+            .then(() => resolve())
+            .catch(() => resolve());
+        });
+        clipObjectsRemoved += batch.length;
+      }
+    }
+
+    // Wipe per-camera Redis streams so a new camera created later with the
+    // same id (or just to free memory) doesn't inherit stale state.
+    await Promise.allSettled([
+      redis.del(`frames.${id}`),
+      redis.del(`detections.${id}`),
+    ]);
+
+    return c.json({
+      ok: true,
+      removed: {
+        segments: segmentsRemoved,
+        frames: framesRemoved,
+        clip_objects: clipObjectsRemoved,
+      },
+    });
   });
 
   // Probe the camera's RTSP URL via the ingestor (which has ffprobe). Optional
