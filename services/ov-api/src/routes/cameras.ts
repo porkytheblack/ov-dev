@@ -12,7 +12,7 @@ export function makeCameraRoutes(sql: ReturnType<typeof postgres>) {
   const cameraInput = z.object({
     name: z.string().min(1),
     rtsp_url: z.string().min(1),
-    sample_fps: z.number().int().min(1).max(30).optional(),
+    sample_fps: z.number().int().min(1).max(60).optional(),
     frame_context: z.record(z.any()).optional(),
     vlm_enabled: z.boolean().optional(),
   });

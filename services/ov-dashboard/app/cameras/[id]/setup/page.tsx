@@ -19,7 +19,60 @@ export default function SetupPage() {
   const [rois, setRois] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
+  // Camera-level fields.
+  const [camera, setCamera] = useState<any>(null);
+  const [camName, setCamName] = useState("");
+  const [camRtsp, setCamRtsp] = useState("");
+  const [camFps, setCamFps] = useState(25);
+  const [camVlm, setCamVlm] = useState(false);
+  const [camSaving, setCamSaving] = useState(false);
+  const [camSavedAt, setCamSavedAt] = useState<number | null>(null);
+  const [camErr, setCamErr] = useState<string | null>(null);
+
+  function hydrateCamera(c: any) {
+    setCamera(c);
+    setCamName(c?.name ?? "");
+    setCamRtsp(c?.rtsp_url ?? "");
+    setCamFps(Number(c?.sample_fps ?? 25));
+    setCamVlm(Boolean(c?.vlm_enabled));
+  }
+
+  async function saveCamera() {
+    setCamSaving(true);
+    setCamErr(null);
+    try {
+      const r = await fetch(`/api/cameras/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: camName.trim(),
+          rtsp_url: camRtsp.trim(),
+          sample_fps: camFps,
+          vlm_enabled: camVlm,
+        }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
+      const fresh = await fetch(`/api/cameras/${id}`).then((x) => x.json());
+      hydrateCamera(fresh);
+      setCamSavedAt(Date.now());
+    } catch (e) {
+      setCamErr((e as Error).message);
+    } finally {
+      setCamSaving(false);
+    }
+  }
+
+  const camDirty =
+    camera !== null &&
+    (camera.name !== camName ||
+      camera.rtsp_url !== camRtsp ||
+      Number(camera.sample_fps) !== camFps ||
+      Boolean(camera.vlm_enabled) !== camVlm);
+
   useEffect(() => {
+    fetch(`/api/cameras/${id}`)
+      .then((r) => r.json())
+      .then(hydrateCamera);
     fetch("/api/cameras/" + id + "/rois")
       .then((r) => r.json())
       .then((j) => setRois(j.rois ?? []));
@@ -69,6 +122,89 @@ export default function SetupPage() {
       <Nav />
       <main className="max-w-6xl mx-auto px-4 py-6">
         <h1 className="text-[18px] mb-4">Camera setup</h1>
+
+        <section className="card mb-6">
+          <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-3">
+            CAMERA SETTINGS
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="block">
+              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">
+                NAME
+              </div>
+              <input
+                className="input-text w-full"
+                value={camName}
+                onChange={(e) => setCamName(e.target.value)}
+                placeholder="Front gate"
+              />
+            </label>
+            <label className="block">
+              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">
+                RTSP URL
+              </div>
+              <input
+                className="input w-full"
+                value={camRtsp}
+                onChange={(e) => setCamRtsp(e.target.value)}
+                placeholder="rtsp://user:pass@host:554/Streaming/Channels/101"
+              />
+            </label>
+            <label className="block">
+              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">
+                SAMPLE FPS
+              </div>
+              <input
+                type="number"
+                min={1}
+                max={60}
+                className="input w-32"
+                value={camFps}
+                onChange={(e) => setCamFps(Number(e.target.value))}
+              />
+              <div className="font-mono text-[10px] text-text-dim mt-1">
+                Restarts the stream; takes effect within ~15s.
+              </div>
+            </label>
+            <label className="flex items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                checked={camVlm}
+                onChange={(e) => setCamVlm(e.target.checked)}
+              />
+              <span className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px]">
+                VLM SUMMARIES
+              </span>
+            </label>
+          </div>
+          {camErr && (
+            <div className="mt-3 font-mono text-[11px] text-danger">{camErr}</div>
+          )}
+          <div className="flex items-center gap-2 mt-3">
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={!camDirty || camSaving || !camName.trim() || !camRtsp.trim()}
+              onClick={saveCamera}
+            >
+              {camSaving ? "SAVING…" : "SAVE CHANGES"}
+            </button>
+            {camera && (
+              <button
+                type="button"
+                className="btn"
+                disabled={!camDirty || camSaving}
+                onClick={() => hydrateCamera(camera)}
+              >
+                REVERT
+              </button>
+            )}
+            {camSavedAt && !camDirty && (
+              <span className="font-mono text-[11px] text-success">SAVED</span>
+            )}
+          </div>
+        </section>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
             <RoiEditor cameraId={id} onSave={(p) => setPoly(p)} />
