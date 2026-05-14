@@ -228,34 +228,52 @@ export function makeCameraRoutes(sql: ReturnType<typeof postgres>) {
 
   app.get("/:id/snapshot", async (c) => {
     const id = c.req.param("id");
-    // The ingestor uploads every frame to MinIO and deletes it after the detector consumes
-    // it; instead of racing that, ask MinIO for the most recent object under the frames/{id}/ prefix.
+    // The ingestor publishes every sampled frame to the per-camera Redis stream
+    // `frames.{id}` with its MinIO storage_key, then the detector deletes the
+    // object after consuming it. Reading the freshest stream entry gives the
+    // newest live frame in O(1) — listing the bucket was both slow and crashed
+    // the API once MinIO's listObjectsV2 XML response exceeded fast-xml-parser's
+    // entity-expansion limit.
     try {
-      const stream = minio.listObjectsV2(BUCKETS.frames, `frames/${id}/`, true);
-      let latest: { name: string; lastModified: Date } | null = null;
-      for await (const obj of stream) {
-        if (!obj.name) continue;
-        if (!latest || (obj.lastModified && obj.lastModified > latest.lastModified)) {
-          latest = { name: obj.name, lastModified: obj.lastModified ?? new Date(0) };
+      const entries = (await redis.xrevrange(
+        `frames.${id}`,
+        "+",
+        "-",
+        "COUNT",
+        1,
+      )) as Array<[string, string[]]>;
+      const fields = entries[0]?.[1];
+      let storageKey: string | undefined;
+      if (fields) {
+        for (let i = 0; i + 1 < fields.length; i += 2) {
+          if (fields[i] === "storage_key") {
+            storageKey = fields[i + 1];
+            break;
+          }
         }
       }
-      if (!latest) {
-        // No live snapshot — fall back to the latest clip poster.
-        const rows = await sql<any[]>`
-          SELECT poster_key FROM clips
-           WHERE camera_id = ${id}::uuid AND poster_key IS NOT NULL
-           ORDER BY end_ts DESC LIMIT 1
-        `;
-        if (rows[0]?.poster_key) {
-          const obj = await minio.getObject(BUCKETS.clips, rows[0].poster_key);
+      if (storageKey) {
+        try {
+          const obj = await minio.getObject(BUCKETS.frames, storageKey);
           c.header("content-type", "image/jpeg");
+          c.header("cache-control", "no-store");
           return c.body(obj as any);
+        } catch {
+          // Race with the detector cleanup — fall through to the poster fallback.
         }
-        return c.json({ error: "no snapshot available" }, 404);
       }
-      const obj = await minio.getObject(BUCKETS.frames, latest.name);
-      c.header("content-type", "image/jpeg");
-      return c.body(obj as any);
+      const rows = await sql<Array<{ poster_key: string | null }>>`
+        SELECT poster_key FROM clips
+         WHERE camera_id = ${id}::uuid AND poster_key IS NOT NULL
+         ORDER BY end_ts DESC LIMIT 1
+      `;
+      if (rows[0]?.poster_key) {
+        const obj = await minio.getObject(BUCKETS.clips, rows[0].poster_key);
+        c.header("content-type", "image/jpeg");
+        c.header("cache-control", "no-store");
+        return c.body(obj as any);
+      }
+      return c.json({ error: "no snapshot available" }, 404);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 500);
     }
