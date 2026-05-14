@@ -22,14 +22,23 @@ function LoginPage() {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    // Discover whether the wizard is still needed.
-    fetch("/api/auth/me")
+    // If already signed in, bounce home.
+    fetch("/api/auth/me", { credentials: "include" })
       .then((r) => r.json())
       .then((j) => {
         if (j.user) router.replace("/");
       })
       .catch(() => {});
-  }, [router]);
+    // Sync the wizard toggle with the system state so refreshing the page
+    // after admin creation drops back to the sign-in form.
+    fetch("/api/auth/status")
+      .then((r) => r.json())
+      .then((j) => {
+        if (j.initialized) setWizard(false);
+        else if (!params.get("wizard")) setWizard(true);
+      })
+      .catch(() => {});
+  }, [router, params]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -39,6 +48,7 @@ function LoginPage() {
       const endpoint = wizard ? "/api/auth/wizard" : "/api/auth/login";
       const r = await fetch(endpoint, {
         method: "POST",
+        credentials: "include",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
@@ -46,7 +56,8 @@ function LoginPage() {
         const data = await r.json().catch(() => ({}));
         throw new Error(data.error ?? `HTTP ${r.status}`);
       }
-      router.replace("/");
+      // Hard reload so the SSR root sees the new cookie.
+      window.location.href = "/";
     } catch (e) {
       setErr((e as Error).message);
     } finally {

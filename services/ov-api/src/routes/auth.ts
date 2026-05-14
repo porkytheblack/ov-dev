@@ -13,6 +13,13 @@ export function makeAuthRoutes(sql: ReturnType<typeof postgres>) {
   const loginSchema = z.object({ username: z.string().min(1), password: z.string().min(1) });
   const wizardSchema = z.object({ username: z.string().min(1), password: z.string().min(8) });
 
+  // Public: is the system bootstrapped? Used by the dashboard to decide between
+  // the first-boot wizard and the regular login screen.
+  app.get("/status", async (c) => {
+    const rows = await sql<Array<{ n: number }>>`SELECT count(*)::int AS n FROM users`;
+    return c.json({ initialized: (rows[0]?.n ?? 0) > 0 });
+  });
+
   app.get("/me", async (c) => {
     const session =
       getCookie(c, "ov_session") ?? c.req.header("authorization")?.replace(/^bearer\s+/i, "");

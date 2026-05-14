@@ -15,15 +15,21 @@ async function getMe(cookie: string) {
   }
 }
 
+async function isInitialized(): Promise<boolean> {
+  try {
+    const r = await api<{ initialized: boolean }>("/auth/status");
+    return r.initialized;
+  } catch {
+    return true; // fail closed — show login, not wizard
+  }
+}
+
 export default async function Page() {
   const cookie = headers().get("cookie") ?? "";
   const me = await getMe(cookie);
   if (!me) {
-    // First-boot wizard or login.
-    const wizard = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://ov-api:3001"}/api/auth/me`, { cache: "no-store" })
-      .then((r) => r.json())
-      .catch(() => null);
-    redirect(wizard?.user ? "/login" : "/login?wizard=1");
+    const initialized = await isInitialized();
+    redirect(initialized ? "/login" : "/login?wizard=1");
   }
   const cameras = await api<{ cameras: any[] }>("/cameras", { cookie }).catch(() => ({ cameras: [] }));
   const incidents = await api<{ incidents: any[] }>("/incidents?limit=10", { cookie }).catch(
