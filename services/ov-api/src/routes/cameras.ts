@@ -73,11 +73,36 @@ export function makeCameraRoutes(sql: ReturnType<typeof postgres>) {
     return c.json({ ok: true });
   });
 
+  // Probe the camera's RTSP URL via the ingestor (which has ffprobe). Optional
+  // `rtsp_url` body lets the dashboard test an unsaved URL before writing it.
   app.post("/:id/test", async (c) => {
     const id = c.req.param("id");
-    // Trigger a single-frame status check by updating updated_at.
-    await sql`UPDATE cameras SET updated_at = now() WHERE id = ${id}::uuid`;
-    return c.json({ ok: true });
+    let body: { rtsp_url?: string } = {};
+    try {
+      body = (await c.req.json()) ?? {};
+    } catch {
+      /* empty body is fine */
+    }
+    let rtspUrl = body.rtsp_url;
+    if (!rtspUrl) {
+      const rows = await sql<Array<{ rtspUrl: string }>>`
+        SELECT rtsp_url AS "rtspUrl" FROM cameras WHERE id = ${id}::uuid
+      `;
+      if (!rows[0]) return c.json({ error: "camera not found" }, 404);
+      rtspUrl = rows[0].rtspUrl;
+    }
+    const ingestor = process.env.INGESTOR_URL ?? "http://ov-ingestor:8000";
+    try {
+      const r = await fetch(`${ingestor}/probe`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rtsp_url: rtspUrl, timeout_seconds: 10 }),
+      });
+      const data = (await r.json()) as { ok: boolean; error?: string; info?: unknown };
+      return c.json(data, r.ok ? 200 : 502);
+    } catch (e) {
+      return c.json({ ok: false, error: `ingestor unreachable: ${(e as Error).message}` }, 502);
+    }
   });
 
   app.get("/:id/snapshot", async (c) => {

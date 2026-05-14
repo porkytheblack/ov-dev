@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+import subprocess
 
 from fastapi import FastAPI
+from pydantic import BaseModel
 from overwatch_shared import ensure_buckets, get_logger, make_minio, make_redis
 
 from .camera_worker import CameraWorker
@@ -113,3 +116,69 @@ async def health() -> dict:
             for cid, w in _workers.items()
         },
     }
+
+
+class ProbeRequest(BaseModel):
+    rtsp_url: str
+    timeout_seconds: int = 10
+
+
+@app.post("/probe")
+async def probe(req: ProbeRequest) -> dict:
+    """Run ffprobe against an RTSP URL with a hard timeout. Returns
+    { ok, error?, info? } so the dashboard can validate a URL before save."""
+    if not req.rtsp_url.strip():
+        return {"ok": False, "error": "rtsp_url is empty"}
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-rtsp_transport", "tcp",
+        "-timeout", str(req.timeout_seconds * 1_000_000),  # ffprobe wants µs
+        "-show_streams",
+        "-show_format",
+        "-of", "json",
+        req.rtsp_url,
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=req.timeout_seconds + 5
+            )
+        except asyncio.TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            return {"ok": False, "error": f"timeout after {req.timeout_seconds}s"}
+    except FileNotFoundError:
+        return {"ok": False, "error": "ffprobe not installed in container"}
+
+    if proc.returncode != 0:
+        err = (stderr or b"").decode("utf-8", errors="ignore").strip()
+        return {"ok": False, "error": err or f"ffprobe exited {proc.returncode}"}
+
+    try:
+        data = json.loads(stdout.decode("utf-8", errors="ignore"))
+    except json.JSONDecodeError:
+        return {"ok": False, "error": "ffprobe returned non-JSON"}
+
+    streams = data.get("streams", []) or []
+    video = next((s for s in streams if s.get("codec_type") == "video"), None)
+    info: dict = {}
+    if video is not None:
+        info["codec"] = video.get("codec_name")
+        info["width"] = video.get("width")
+        info["height"] = video.get("height")
+        rate = video.get("avg_frame_rate") or video.get("r_frame_rate") or "0/1"
+        try:
+            num, den = rate.split("/")
+            fps = round(int(num) / max(1, int(den)), 1) if int(den) else 0
+            info["fps"] = fps
+        except (ValueError, ZeroDivisionError):
+            info["fps"] = None
+    fmt = data.get("format", {}) or {}
+    info["format"] = fmt.get("format_long_name") or fmt.get("format_name")
+    return {"ok": True, "info": info}

@@ -28,6 +28,12 @@ export default function SetupPage() {
   const [camSaving, setCamSaving] = useState(false);
   const [camSavedAt, setCamSavedAt] = useState<number | null>(null);
   const [camErr, setCamErr] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<
+    | { ok: true; info?: { codec?: string; width?: number; height?: number; fps?: number; format?: string } }
+    | { ok: false; error: string }
+    | null
+  >(null);
 
   function hydrateCamera(c: any) {
     setCamera(c);
@@ -68,6 +74,38 @@ export default function SetupPage() {
       camera.rtsp_url !== camRtsp ||
       Number(camera.sample_fps) !== camFps ||
       Boolean(camera.vlm_enabled) !== camVlm);
+
+  async function testConnection() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const r = await fetch(`/api/cameras/${id}/test`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rtsp_url: camRtsp.trim() }),
+      });
+      const data = await r.json();
+      setTestResult(data);
+    } catch (e) {
+      setTestResult({ ok: false, error: (e as Error).message });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  // Poll the camera doc every 5s so the on-page status pill stays fresh.
+  useEffect(() => {
+    const i = setInterval(() => {
+      fetch(`/api/cameras/${id}`)
+        .then((r) => r.json())
+        .then((c) => {
+          if (!c) return;
+          setCamera((prev: any) => ({ ...prev, ...c }));
+        })
+        .catch(() => {});
+    }, 5000);
+    return () => clearInterval(i);
+  }, [id]);
 
   useEffect(() => {
     fetch(`/api/cameras/${id}`)
@@ -124,8 +162,26 @@ export default function SetupPage() {
         <h1 className="text-[18px] mb-4">Camera setup</h1>
 
         <section className="card mb-6">
-          <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-3">
-            CAMERA SETTINGS
+          <div className="flex items-center justify-between mb-3">
+            <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px]">
+              CAMERA SETTINGS
+            </div>
+            <div className="flex items-center gap-3 font-mono text-[11px]">
+              <span className={`pill ${
+                camera?.status === "online"
+                  ? "pill-live"
+                  : camera?.status === "offline"
+                  ? "pill-offline"
+                  : "pill-connecting"
+              }`}>
+                {(camera?.status ?? "unknown").toUpperCase()}
+              </span>
+              <span className="text-text-dim">
+                {camera?.last_frame_at
+                  ? `last frame ${new Date(camera.last_frame_at).toISOString().slice(11, 19)}`
+                  : "no frames received"}
+              </span>
+            </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="block">
@@ -180,6 +236,22 @@ export default function SetupPage() {
           {camErr && (
             <div className="mt-3 font-mono text-[11px] text-danger">{camErr}</div>
           )}
+          {testResult && (
+            <div className={`mt-3 font-mono text-[11px] ${
+              testResult.ok ? "text-success" : "text-danger"
+            }`}>
+              {testResult.ok ? (
+                <>
+                  REACHABLE ·{" "}
+                  {testResult.info?.codec ?? "?"} ·{" "}
+                  {testResult.info?.width ?? "?"}×{testResult.info?.height ?? "?"} ·{" "}
+                  {testResult.info?.fps ?? "?"} fps
+                </>
+              ) : (
+                <>FAILED · {testResult.error}</>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-2 mt-3">
             <button
               type="button"
@@ -199,6 +271,14 @@ export default function SetupPage() {
                 REVERT
               </button>
             )}
+            <button
+              type="button"
+              className="btn"
+              disabled={!camRtsp.trim() || testing}
+              onClick={testConnection}
+            >
+              {testing ? "TESTING…" : "TEST CONNECTION"}
+            </button>
             {camSavedAt && !camDirty && (
               <span className="font-mono text-[11px] text-success">SAVED</span>
             )}
