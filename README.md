@@ -14,8 +14,8 @@ cp .env.example .env
 make up
 ```
 
-Open `http://localhost`. First boot redirects to a wizard that creates the
-initial operator account.
+Open `http://localhost:9090`. First boot redirects to a wizard that creates
+the initial operator account.
 
 ## Stack
 
@@ -69,7 +69,7 @@ Inbound WhatsApp webhooks are served at `http://<your-host>/webhook/whatsapp`
 
 ## Testing the demo flow
 
-1. `make up` and open `http://localhost`. Create the admin user via the
+1. `make up` and open `http://localhost:9090`. Create the admin user via the
    first-boot wizard.
 2. Add a camera (`/cameras/new`). Use a real RTSP URL or, for a
    throw-away test, run `make dev-rtsp` and use `rtsp://mediamtx:8554/test`.

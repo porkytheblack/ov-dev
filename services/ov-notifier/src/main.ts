@@ -31,7 +31,7 @@ type PendingNotification = {
 const waiting = new Map<string, PendingNotification>();
 
 function makeAttachmentUrls(args: { clipKey: string; posterKey?: string }) {
-  const base = (process.env.DASHBOARD_BASE_URL ?? "http://localhost").replace(/\/+$/, "");
+  const base = (process.env.DASHBOARD_BASE_URL ?? "http://localhost:9090").replace(/\/+$/, "");
   return {
     clipUrl: `${base}/api/clips/by-key/${encodeURIComponent(args.clipKey)}`,
     posterUrl: args.posterKey

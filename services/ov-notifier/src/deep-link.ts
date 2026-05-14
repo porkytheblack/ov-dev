@@ -13,7 +13,7 @@ export function signDeepLink(args: {
   const payload = `${args.incidentId}.${expiresAt.getTime()}`;
   const sig = createHmac("sha256", args.secret).update(payload).digest("hex");
   const token = Buffer.from(`${payload}.${sig}`).toString("base64url");
-  const base = process.env.DASHBOARD_BASE_URL ?? "http://localhost";
+  const base = process.env.DASHBOARD_BASE_URL ?? "http://localhost:9090";
   return {
     url: `${base.replace(/\/+$/, "")}/incidents/${args.incidentId}/playback?token=${token}`,
     token,

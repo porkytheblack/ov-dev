@@ -199,8 +199,8 @@ services:
     restart: unless-stopped
     networks: [overwatch]
     ports:
-      - "80:80"
-      - "443:443"
+      - "9090:80"
+      - "9443:443"
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
