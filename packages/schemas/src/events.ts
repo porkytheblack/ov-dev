@@ -19,7 +19,7 @@ export type Detection = z.infer<typeof Detection>;
 export const FrameSampled = z.object({
   type: z.literal("frame.sampled"),
   camera_id: z.string().uuid(),
-  ts: z.string().datetime(),
+  ts: z.string().datetime({ offset: true }),
   frame_id: z.string(),
   storage_key: z.string(),
   width: z.number().optional(),
@@ -30,7 +30,7 @@ export type FrameSampled = z.infer<typeof FrameSampled>;
 export const FrameDetections = z.object({
   type: z.literal("frame.detections"),
   camera_id: z.string().uuid(),
-  ts: z.string().datetime(),
+  ts: z.string().datetime({ offset: true }),
   frame_id: z.string(),
   detections: z.array(Detection),
 });
@@ -40,8 +40,8 @@ export const SegmentReady = z.object({
   type: z.literal("segment.ready"),
   camera_id: z.string().uuid(),
   segment_id: z.string().uuid(),
-  start_ts: z.string().datetime(),
-  end_ts: z.string().datetime(),
+  start_ts: z.string().datetime({ offset: true }),
+  end_ts: z.string().datetime({ offset: true }),
   storage_key: z.string(),
   duration_ms: z.number(),
   size_bytes: z.number(),
@@ -54,7 +54,7 @@ export const IncidentOpened = z.object({
   camera_id: z.string().uuid(),
   roi_id: z.string().uuid(),
   classes: z.array(z.string()),
-  opened_at: z.string().datetime(),
+  opened_at: z.string().datetime({ offset: true }),
   track_id: z.string().optional(),
 });
 export type IncidentOpened = z.infer<typeof IncidentOpened>;
@@ -62,7 +62,7 @@ export type IncidentOpened = z.infer<typeof IncidentOpened>;
 export const IncidentClosed = z.object({
   type: z.literal("incident.closed"),
   incident_id: z.string().uuid(),
-  closed_at: z.string().datetime(),
+  closed_at: z.string().datetime({ offset: true }),
   duration_ms: z.number(),
 });
 export type IncidentClosed = z.infer<typeof IncidentClosed>;
@@ -75,8 +75,8 @@ export const ClipReady = z.object({
   kind: z.enum(["incident", "regular"]),
   storage_key: z.string(),
   poster_key: z.string().optional(),
-  start_ts: z.string().datetime(),
-  end_ts: z.string().datetime(),
+  start_ts: z.string().datetime({ offset: true }),
+  end_ts: z.string().datetime({ offset: true }),
 });
 export type ClipReady = z.infer<typeof ClipReady>;
 
@@ -91,7 +91,7 @@ export const CameraStatusChanged = z.object({
   type: z.literal("camera.status_changed"),
   camera_id: z.string().uuid(),
   status: z.enum(["connecting", "online", "offline"]),
-  ts: z.string().datetime(),
+  ts: z.string().datetime({ offset: true }),
 });
 export type CameraStatusChanged = z.infer<typeof CameraStatusChanged>;
 
