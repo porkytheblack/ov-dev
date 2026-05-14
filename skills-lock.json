@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "glove": {
+      "source": "porkytheblack/glove",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/glove/SKILL.md",
+      "computedHash": "1c97e12298d9a7ebb80667be2839f797572534322656947afb92f7da982e9eaf"
+    },
+    "station": {
+      "source": "porkytheblack/station",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/station/SKILL.md",
+      "computedHash": "f074159448ed70dbd617ca76f7b5af277a495fba10ea0eb66134d5297c5a1ed2"
+    }
+  }
+}
