@@ -3,11 +3,11 @@ const nextConfig = {
   reactStrictMode: true,
   output: "standalone",
   async rewrites() {
-    const api = process.env.NEXT_PUBLIC_API_URL ?? "http://ov-api:3001";
-    return [
-      // HTTP API only; the /events WebSocket is reverse-proxied by Caddy in prod.
-      { source: "/api/:path*", destination: `${api}/api/:path*` },
-    ];
+    // In the production Docker setup, Caddy intercepts /api/* at the edge and
+    // these rewrites are never hit. This is only useful for `pnpm dev` outside
+    // Docker, where the dashboard runs on :3000 and ov-api on :3001.
+    const api = (process.env.INTERNAL_API_URL ?? "http://ov-api:3001").replace(/\/+$/, "");
+    return [{ source: "/api/:path*", destination: `${api}/api/:path*` }];
   },
 };
 module.exports = nextConfig;
