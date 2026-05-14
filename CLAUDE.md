@@ -1,0 +1,1 @@
+If doing anything in relation to agents refer to the /glove skill, if doing anything in relation to station for orcherstration refer to /station skill
