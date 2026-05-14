@@ -58,8 +58,13 @@ export default function SetupPage() {
         }),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
-      const fresh = await fetch(`/api/cameras/${id}`).then((x) => x.json());
-      hydrateCamera(fresh);
+      const data = (await r.json()) as { ok: boolean; camera?: any };
+      if (data.camera) {
+        hydrateCamera(data.camera);
+      } else {
+        const fresh = await fetch(`/api/cameras/${id}`).then((x) => x.json());
+        hydrateCamera(fresh);
+      }
       setCamSavedAt(Date.now());
     } catch (e) {
       setCamErr((e as Error).message);
@@ -74,6 +79,25 @@ export default function SetupPage() {
       camera.rtsp_url !== camRtsp ||
       Number(camera.sample_fps) !== camFps ||
       Boolean(camera.vlm_enabled) !== camVlm);
+
+  const [deleting, setDeleting] = useState(false);
+
+  async function deleteCamera() {
+    if (!window.confirm(
+      "Delete this camera?\n\n" +
+      "This also removes all of its ROIs, incidents, segments, and clips. " +
+      "This cannot be undone.",
+    )) return;
+    setDeleting(true);
+    try {
+      const r = await fetch(`/api/cameras/${id}`, { method: "DELETE" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
+      router.replace("/");
+    } catch (e) {
+      setCamErr((e as Error).message);
+      setDeleting(false);
+    }
+  }
 
   async function testConnection() {
     setTesting(true);
@@ -282,6 +306,16 @@ export default function SetupPage() {
             {camSavedAt && !camDirty && (
               <span className="font-mono text-[11px] text-success">SAVED</span>
             )}
+            <div className="flex-1" />
+            <button
+              type="button"
+              className="btn"
+              style={{ borderColor: "var(--danger)", color: "var(--danger)" }}
+              disabled={deleting}
+              onClick={deleteCamera}
+            >
+              {deleting ? "DELETING…" : "DELETE CAMERA"}
+            </button>
           </div>
         </section>
 

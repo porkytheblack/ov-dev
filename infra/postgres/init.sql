@@ -85,8 +85,8 @@ SELECT ensure_detection_partitions(7);
 
 CREATE TABLE IF NOT EXISTS incidents (
   id UUID PRIMARY KEY,
-  camera_id UUID NOT NULL REFERENCES cameras(id),
-  roi_id UUID NOT NULL REFERENCES rois(id),
+  camera_id UUID NOT NULL REFERENCES cameras(id) ON DELETE CASCADE,
+  roi_id UUID NOT NULL REFERENCES rois(id) ON DELETE CASCADE,
   track_id TEXT,
   classes TEXT[] NOT NULL,
   opened_at TIMESTAMPTZ NOT NULL,
@@ -203,3 +203,12 @@ CREATE TRIGGER camera_change_trigger
 -- `make migrate` re-pipes it so existing volumes pick up new columns.
 -- ============================================================================
 ALTER TABLE rois ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+
+-- Cascade incident deletes when a camera or ROI is removed. Postgres names
+-- auto-generated FKs <table>_<col>_fkey; drop-then-add is idempotent.
+ALTER TABLE incidents DROP CONSTRAINT IF EXISTS incidents_camera_id_fkey;
+ALTER TABLE incidents ADD CONSTRAINT incidents_camera_id_fkey
+  FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE CASCADE;
+ALTER TABLE incidents DROP CONSTRAINT IF EXISTS incidents_roi_id_fkey;
+ALTER TABLE incidents ADD CONSTRAINT incidents_roi_id_fkey
+  FOREIGN KEY (roi_id) REFERENCES rois(id) ON DELETE CASCADE;

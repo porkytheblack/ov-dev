@@ -52,19 +52,26 @@ export function makeCameraRoutes(sql: ReturnType<typeof postgres>) {
   app.patch("/:id", zValidator("json", cameraPatch), async (c) => {
     const id = c.req.param("id");
     const b = c.req.valid("json");
-    const updates: any[] = [];
-    if (b.name !== undefined) updates.push(sql`name = ${b.name}`);
-    if (b.rtsp_url !== undefined) updates.push(sql`rtsp_url = ${b.rtsp_url}`);
-    if (b.sample_fps !== undefined) updates.push(sql`sample_fps = ${b.sample_fps}`);
-    if (b.vlm_enabled !== undefined) updates.push(sql`vlm_enabled = ${b.vlm_enabled}`);
-    if (b.frame_context !== undefined) updates.push(sql`frame_context = ${JSON.stringify(b.frame_context)}::jsonb`);
-    if (updates.length === 0) return c.json({ ok: true });
-    await sql`
-      UPDATE cameras SET ${updates.reduce((acc, u, i) => i === 0 ? u : sql`${acc}, ${u}`)},
-                         updated_at = now()
+    const name = b.name ?? null;
+    const rtsp = b.rtsp_url ?? null;
+    const fps = b.sample_fps ?? null;
+    const vlm = b.vlm_enabled ?? null;
+    const fc = b.frame_context !== undefined ? JSON.stringify(b.frame_context) : null;
+    const rows = await sql<any[]>`
+      UPDATE cameras
+         SET name          = COALESCE(${name}, name),
+             rtsp_url      = COALESCE(${rtsp}, rtsp_url),
+             sample_fps    = COALESCE(${fps}, sample_fps),
+             vlm_enabled   = COALESCE(${vlm}, vlm_enabled),
+             frame_context = COALESCE(${fc}::jsonb, frame_context),
+             updated_at    = now()
        WHERE id = ${id}::uuid
+       RETURNING id, name, rtsp_url, enabled, sample_fps, status, last_frame_at,
+                 frame_context, vlm_enabled, frame_width, frame_height, created_at,
+                 updated_at
     `;
-    return c.json({ ok: true });
+    if (rows.length === 0) return c.json({ error: "not found" }, 404);
+    return c.json({ ok: true, camera: rows[0] });
   });
 
   app.delete("/:id", async (c) => {

@@ -72,21 +72,29 @@ export function makeRoiRoutes(sql: ReturnType<typeof postgres>) {
   root.patch("/:id", zValidator("json", roiInput.partial()), async (c) => {
     const id = c.req.param("id");
     const b = c.req.valid("json");
-    const updates: any[] = [];
-    if (b.name !== undefined) updates.push(sql`name = ${b.name}`);
-    if (b.description !== undefined) updates.push(sql`description = ${b.description}`);
-    if (b.polygon !== undefined) updates.push(sql`polygon = ${JSON.stringify(b.polygon)}::jsonb`);
-    if (b.classes_of_interest !== undefined)
-      updates.push(sql`classes_of_interest = ${b.classes_of_interest as unknown as string[]}::text[]`);
-    if (b.match_mode !== undefined) updates.push(sql`match_mode = ${b.match_mode}`);
-    if (b.detection_window !== undefined)
-      updates.push(sql`detection_window = ${JSON.stringify(b.detection_window)}::jsonb`);
-    if (b.linger_threshold_seconds !== undefined)
-      updates.push(sql`linger_threshold_seconds = ${b.linger_threshold_seconds}`);
-    if (b.notify_enabled !== undefined) updates.push(sql`notify_enabled = ${b.notify_enabled}`);
-    if (updates.length === 0) return c.json({ ok: true });
-    await sql`UPDATE rois SET ${updates.reduce((acc, u, i) => (i === 0 ? u : sql`${acc}, ${u}`))} WHERE id = ${id}::uuid`;
-    return c.json({ ok: true });
+    const name = b.name ?? null;
+    const description = b.description ?? null;
+    const polygon = b.polygon !== undefined ? JSON.stringify(b.polygon) : null;
+    const classes = b.classes_of_interest ?? null;
+    const matchMode = b.match_mode ?? null;
+    const detWindow = b.detection_window !== undefined ? JSON.stringify(b.detection_window) : null;
+    const linger = b.linger_threshold_seconds ?? null;
+    const notify = b.notify_enabled ?? null;
+    const rows = await sql<any[]>`
+      UPDATE rois
+         SET name                     = COALESCE(${name}, name),
+             description              = COALESCE(${description}, description),
+             polygon                  = COALESCE(${polygon}::jsonb, polygon),
+             classes_of_interest      = COALESCE(${classes as unknown as string[] | null}::text[], classes_of_interest),
+             match_mode               = COALESCE(${matchMode}, match_mode),
+             detection_window         = COALESCE(${detWindow}::jsonb, detection_window),
+             linger_threshold_seconds = COALESCE(${linger}, linger_threshold_seconds),
+             notify_enabled           = COALESCE(${notify}, notify_enabled)
+       WHERE id = ${id}::uuid
+       RETURNING *
+    `;
+    if (rows.length === 0) return c.json({ error: "not found" }, 404);
+    return c.json({ ok: true, roi: rows[0] });
   });
 
   root.delete("/:id", async (c) => {
