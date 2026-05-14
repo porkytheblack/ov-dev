@@ -1,0 +1,33 @@
+{
+  "name": "@overwatch/ov-incident-engine",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@overwatch/schemas": "workspace:*",
+    "@overwatch/shared-ts": "workspace:*",
+    "drizzle-orm": "^0.30.10",
+    "effect": "^3.4.5",
+    "ioredis": "^5.4.1",
+    "postgres": "^3.4.4",
+    "station-broadcast": "^1.0.4",
+    "station-signal": "^1.0.4",
+    "station-adapter-redis": "^1.0.4",
+    "uuid": "^9.0.1",
+    "zod": "^3.23.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "@types/uuid": "^9.0.8",
+    "tsx": "^4.7.2",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}

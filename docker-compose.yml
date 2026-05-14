@@ -1,0 +1,209 @@
+name: overwatch
+
+networks:
+  overwatch:
+    driver: bridge
+
+volumes:
+  pg-data:
+  redis-data:
+  minio-data:
+  caddy-data:
+  models:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks: [overwatch]
+    environment:
+      POSTGRES_DB: overwatch
+      POSTGRES_USER: overwatch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-overwatch}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U overwatch"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks: [overwatch]
+    command: redis-server /etc/redis/redis.conf
+    volumes:
+      - redis-data:/data
+      - ./infra/redis/redis.conf:/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    networks: [overwatch]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:-overwatch}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-overwatch-secret}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  ov-ingestor:
+    build:
+      context: .
+      dockerfile: services/ov-ingestor/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+  ov-detector:
+    build:
+      context: .
+      dockerfile: services/ov-detector/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    volumes:
+      - models:/models
+    depends_on:
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+  ov-clip-builder:
+    build:
+      context: .
+      dockerfile: services/ov-clip-builder/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+  ov-vlm:
+    build:
+      context: .
+      dockerfile: services/ov-vlm/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    profiles: ["vlm"]
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+
+  ov-incident-engine:
+    build:
+      context: .
+      dockerfile: services/ov-incident-engine/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  ov-notifier:
+    build:
+      context: .
+      dockerfile: services/ov-notifier/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  ov-agent:
+    build:
+      context: .
+      dockerfile: services/ov-agent/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  ov-whatsapp:
+    build:
+      context: .
+      dockerfile: services/ov-whatsapp/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      redis: { condition: service_healthy }
+      ov-agent: { condition: service_started }
+
+  ov-telegram:
+    build:
+      context: .
+      dockerfile: services/ov-telegram/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      redis: { condition: service_healthy }
+      ov-agent: { condition: service_started }
+
+  ov-api:
+    build:
+      context: .
+      dockerfile: services/ov-api/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  ov-stream-gateway:
+    build:
+      context: .
+      dockerfile: services/ov-stream-gateway/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  ov-dashboard:
+    build:
+      context: .
+      dockerfile: services/ov-dashboard/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      - ov-api
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    networks: [overwatch]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - ov-dashboard
+      - ov-api

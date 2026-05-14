@@ -1,0 +1,40 @@
+name: overwatch-dev
+
+# Dev overlay: exposes ports for direct debugging, mounts source for hot-reload
+# where supported, and ships a synthetic RTSP source (mediamtx) for e2e tests.
+
+services:
+  postgres:
+    ports: ["5432:5432"]
+
+  redis:
+    ports: ["6379:6379"]
+
+  minio:
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  ov-api:
+    ports: ["3001:3001"]
+
+  ov-dashboard:
+    ports: ["3000:3000"]
+
+  ov-stream-gateway:
+    ports:
+      - "8889:8889"
+      - "8554:8554"
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: overwatch-mediamtx
+    restart: unless-stopped
+    networks: [overwatch]
+    ports:
+      - "8555:8554"
+      - "8888:8888"
+    environment:
+      MTX_HLSALWAYSREMUX: "yes"
+      MTX_RTSP: "yes"
+    profiles: ["dev-rtsp"]

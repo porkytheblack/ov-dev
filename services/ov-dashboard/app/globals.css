@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg: #0a0a0a;
+    --surface: #141414;
+    --surface-elev: #1f1f1f;
+    --border: #262626;
+    --border-strong: #404040;
+    --text: #e5e5e5;
+    --text-muted: #a3a3a3;
+    --text-dim: #525252;
+    --accent: #f59e0b;
+    --accent-strong: #fbbf24;
+    --accent-dim: #7c2d12;
+    --success: #10b981;
+    --danger: #ef4444;
+  }
+  html,
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, system-ui, sans-serif;
+    font-weight: 400;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  * {
+    border-radius: 0 !important;
+  }
+  .mono {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply h-8 px-3 border border-border-strong bg-transparent text-text font-mono uppercase tracking-[0.04em] text-[12px]
+           hover:bg-surface-elev transition-colors duration-150;
+  }
+  .btn-primary {
+    @apply h-8 px-3 border border-accent bg-accent text-[#1a0e00] font-mono uppercase tracking-[0.04em] text-[12px]
+           hover:bg-accent-strong hover:border-accent-strong transition-colors duration-150;
+  }
+  .input {
+    @apply h-8 px-2 bg-surface border border-border text-text font-mono text-[12px]
+           focus:outline-none focus:border-border-strong;
+  }
+  .input-text {
+    @apply h-8 px-2 bg-surface border border-border text-text text-[14px]
+           focus:outline-none focus:border-border-strong;
+  }
+  .card {
+    @apply bg-surface border border-border p-4;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1 font-mono uppercase tracking-[0.04em] text-[10px] px-2 h-5 border;
+  }
+  .pill-open {
+    @apply bg-accent text-[#1a0e00] border-accent;
+  }
+  .pill-closed {
+    @apply text-text-muted border-border-strong;
+  }
+  .pill-ack {
+    @apply text-success border-success;
+  }
+  .pill-suppressed {
+    @apply text-text-dim border-text-dim;
+  }
+  .pill-live {
+    @apply text-accent border-accent;
+  }
+  .pill-offline {
+    @apply text-danger border-danger;
+  }
+  .pill-connecting {
+    @apply text-text-muted border-border-strong;
+  }
+  table.ov {
+    @apply w-full border-collapse;
+  }
+  table.ov thead th {
+    @apply text-text-dim uppercase font-mono text-[11px] tracking-[0.08em] text-left
+           py-2 px-3 border-b border-border;
+  }
+  table.ov tbody td {
+    @apply py-2 px-3 border-b border-border align-top;
+  }
+  table.ov td.mono,
+  table.ov td.num {
+    @apply font-mono text-[12px];
+  }
+  table.ov tr:hover td {
+    @apply bg-surface-elev;
+  }
+  .skeleton {
+    @apply bg-surface-elev animate-pulse h-4 w-full;
+  }
+}

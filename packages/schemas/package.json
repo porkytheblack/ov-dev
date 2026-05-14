@@ -1,0 +1,24 @@
+{
+  "name": "@overwatch/schemas",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./events": "./src/events.ts",
+    "./tables": "./src/tables.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "codegen": "tsx build.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.30.10",
+    "zod": "^3.23.5"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.2",
+    "typescript": "^5.4.5"
+  }
+}
