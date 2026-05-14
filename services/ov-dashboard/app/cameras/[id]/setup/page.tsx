@@ -316,7 +316,7 @@ export default function SetupPage() {
               disabled={!camRtsp.trim() || testing}
               onClick={testConnection}
             >
-              {testing ? "TESTING…" : "TEST CONNECTION"}
+              {testing ? "PROBING…" : "PROBE RTSP"}
             </button>
             {camSavedAt && !camDirty && (
               <span className="font-mono text-[11px] text-success">SAVED</span>
