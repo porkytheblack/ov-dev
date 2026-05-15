@@ -137,7 +137,11 @@ export function RoiCanvas({
 
   const dragRef = useRef<Drag>({ kind: "none" });
   const anchorRef = useRef<Pt | null>(null);
-  const rafRef = useRef<number | null>(null);
+  // Latest in-progress new rectangle, kept locally so the create/discard
+  // decision on pointer-up never depends on draftPolygon round-tripping back.
+  const pendingNewRectRef = useRef<Rect | null>(null);
+  const rafRef = useRef<number | null>(null); // draw scheduling
+  const moveRafRef = useRef<number | null>(null); // pointer-move coalescing
 
   // Stable callback refs so a changing parent identity never re-fires effects
   // or detaches listeners mid-drag.
@@ -331,6 +335,7 @@ export function RoiCanvas({
   useEffect(
     () => () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      if (moveRafRef.current != null) cancelAnimationFrame(moveRafRef.current);
     },
     [],
   );
@@ -396,6 +401,7 @@ export function RoiCanvas({
     if (m === "draw") {
       dragRef.current = { kind: "new" };
       anchorRef.current = { x: p.x, y: p.y };
+      pendingNewRectRef.current = { x: p.x, y: p.y, w: 0, h: 0 };
       cb.current.onDraftChange(rectToPoly({ x: p.x, y: p.y, w: 0, h: 0 }));
       return;
     }
@@ -429,21 +435,27 @@ export function RoiCanvas({
 
   function applyMove(p: Pt) {
     const d = dragRef.current;
-    const draft = stateRef.current.draftPolygon;
-    if (!draft) return;
 
+    // A brand-new rectangle is derived purely from the anchor + pointer; it
+    // must NOT wait for draftPolygon to round-trip through the parent (that
+    // state arrives a render later, so gating on it dropped every move and the
+    // box never appeared while dragging).
     if (d.kind === "new") {
       const a = anchorRef.current ?? p;
-      cb.current.onDraftChange(
-        rectToPoly({
-          x: Math.min(a.x, p.x),
-          y: Math.min(a.y, p.y),
-          w: Math.abs(p.x - a.x),
-          h: Math.abs(p.y - a.y),
-        }),
-      );
+      const nr = {
+        x: Math.min(a.x, p.x),
+        y: Math.min(a.y, p.y),
+        w: Math.abs(p.x - a.x),
+        h: Math.abs(p.y - a.y),
+      };
+      pendingNewRectRef.current = nr;
+      cb.current.onDraftChange(rectToPoly(nr));
       return;
     }
+
+    // Move/resize/vertex edits operate on the existing draft geometry.
+    const draft = stateRef.current.draftPolygon;
+    if (!draft) return;
 
     if (d.kind === "vertex") {
       const next = draft.map((pt, i) =>
@@ -505,10 +517,11 @@ export function RoiCanvas({
       }
       return;
     }
-    // rAF-coalesce the geometry update + redraw.
-    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = null;
+    // rAF-coalesce the geometry update (its own ref so it never cancels a
+    // pending redraw, and a redraw never cancels it).
+    if (moveRafRef.current != null) cancelAnimationFrame(moveRafRef.current);
+    moveRafRef.current = requestAnimationFrame(() => {
+      moveRafRef.current = null;
       applyMove(p);
     });
   }
@@ -517,13 +530,19 @@ export function RoiCanvas({
     const d = dragRef.current;
     dragRef.current = { kind: "none" };
     anchorRef.current = null;
+    // Flush any coalesced move so the final geometry isn't lost.
+    if (moveRafRef.current != null) {
+      cancelAnimationFrame(moveRafRef.current);
+      moveRafRef.current = null;
+    }
     if (d.kind === "new") {
-      const draft = stateRef.current.draftPolygon;
-      const r = draft ? bbox(draft) : null;
+      const r = pendingNewRectRef.current;
+      pendingNewRectRef.current = null;
       if (!r || r.w < MIN || r.h < MIN) {
         // Click without a real drag — discard the empty rect, stay in draw.
         cb.current.onDraftChange(null);
       } else {
+        cb.current.onDraftChange(rectToPoly(r));
         cb.current.onAddComplete();
       }
     }
