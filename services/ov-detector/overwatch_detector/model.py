@@ -36,9 +36,17 @@ class Detector:
         self.model: Any = None
         self.tracker_cfg = os.environ.get("TRACKER_CONFIG", "botsort.yaml")
         self.device = os.environ.get("DEVICE", "cpu")
-        self.model_path = os.environ.get("MODEL_PATH", "/models/yolo11l.pt")
+        # Default to the nano model: on CPU, YOLO11L manages ~1 detection per
+        # ~12s per camera with several cameras — far too sparse to ever catch
+        # a person who's only in frame for a few seconds, so the live overlay
+        # looks empty. yolo11n is ~10x faster and still detects people well.
+        # Override MODEL_PATH (e.g. /models/yolo11l.pt) on a GPU box.
+        self.model_path = os.environ.get("MODEL_PATH", "/models/yolo11n.pt")
         self.conf_threshold = float(os.environ.get("CONFIDENCE_THRESHOLD", "0.35"))
         self.iou_threshold = float(os.environ.get("IOU_THRESHOLD", "0.45"))
+        # Smaller inference size = faster CPU inference. 480 keeps people
+        # detectable while roughly halving compute vs the 640 default.
+        self.imgsz = int(os.environ.get("IMGSZ", "480"))
         self._lock = threading.Lock()
         self._load_attempted = False
         self._load_error: str | None = None
@@ -82,6 +90,7 @@ class Detector:
                 tracker=self.tracker_cfg,
                 conf=self.conf_threshold,
                 iou=self.iou_threshold,
+                imgsz=self.imgsz,
                 device=self.device,
                 verbose=False,
             )

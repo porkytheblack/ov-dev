@@ -66,6 +66,12 @@ services:
     restart: unless-stopped
     networks: [overwatch]
     env_file: [.env]
+    # Tiny frames buffer: the CPU detector reads in batches, so a deep buffer
+    # means it chews stale frames and the live overlay trails reality. Keeping
+    # only ~1s of frames forces it onto near-current frames (older ones are
+    # trimmed and skipped), so detected boxes line up with what's on screen.
+    environment:
+      FRAMES_STREAM_MAXLEN: "6"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -78,6 +84,16 @@ services:
     restart: unless-stopped
     networks: [overwatch]
     env_file: [.env]
+    # CPU inference: the nano model + 480px keep detections frequent enough
+    # to actually catch movement (YOLO11L managed only ~1 det / 12s / camera).
+    # Point MODEL_PATH at /models/yolo11l.pt and raise IMGSZ on a GPU host.
+    environment:
+      MODEL_PATH: /models/yolo11n.pt
+      IMGSZ: "480"
+      # ByteTrack instead of BoT-SORT: keeps track_id (incident dedup) but
+      # drops BoT-SORT's global motion compensation + optional ReID, which
+      # roughly halve CPU throughput. Big speedup, same incident behaviour.
+      TRACKER_CONFIG: bytetrack.yaml
     volumes:
       - models:/models
     depends_on:

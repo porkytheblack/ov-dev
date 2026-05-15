@@ -31,6 +31,15 @@ from overwatch_shared import (
 from .model import detector_singleton
 
 log = get_logger("ov-detector")
+
+# Cap the per-camera detections stream. It is consumed live by the ov-api WS
+# (bbox overlay) and by ov-incident-engine; both stay near the tail in normal
+# operation. Unbounded, it grew to tens of thousands of entries and any
+# consumer that briefly fell behind (e.g. after a restart) then replayed an
+# enormous backlog of stale detections. The cap bounds memory and worst-case
+# catch-up while staying far above incident-engine's working set.
+DETECTIONS_STREAM_MAXLEN = int(os.environ.get("DETECTIONS_STREAM_MAXLEN", "3000"))
+
 app = FastAPI(title="ov-detector")
 
 _workers: dict[str, asyncio.Task] = {}
@@ -126,6 +135,7 @@ async def consume_camera(camera_id: str, redis, minio) -> None:
                 "frame_id": event["frame_id"],
                 "detections": detections,
             },
+            maxlen=DETECTIONS_STREAM_MAXLEN,
         )
         try:
             await persist_detections(camera_id, ts, event["frame_id"], detections)
@@ -135,7 +145,15 @@ async def consume_camera(camera_id: str, redis, minio) -> None:
         with contextlib.suppress(Exception):
             await asyncio.to_thread(minio.remove_object, BUCKETS["frames"], storage_key)
 
-    await consume_group(redis, stream, group, consumer, handle, stop_event=_stop_event)
+    # count=1: pull a single frame per read so the detector always works on
+    # the freshest surviving entry (the frames stream is hard-capped, so older
+    # undelivered frames are trimmed and skipped). A larger batch would mark 16
+    # frames "delivered" then chew them serially while CPU YOLO is slow — the
+    # tail of each batch would be ~16 inferences stale, defeating the live
+    # overlay. One-at-a-time keeps the bbox overlay close to real time.
+    await consume_group(
+        redis, stream, group, consumer, handle, count=1, stop_event=_stop_event
+    )
 
 
 async def reconcile_loop() -> None:
