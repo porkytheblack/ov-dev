@@ -26,13 +26,14 @@ import Hls from "hls.js";
 // lookup target back in time selects the older, correct detection.
 // More negative => boxes drawn for an earlier moment (pull them back / make
 // them trail). Less negative / positive => boxes move ahead. Tune to taste.
-const SYNC_OFFSET_MS = -1000;
+const SYNC_OFFSET_MS = -3500;
 // A buffered detection is "this frame's" only if within this of the target.
-const MATCH_TOLERANCE_MS = 1500;
+const MATCH_TOLERANCE_MS = 2500;
 // Only used when the stream exposes no PDT (approx. HLS glass-to-glass).
-const FALLBACK_VIDEO_DELAY_MS = 4000;
-// How much detection history to retain for matching.
-const BUFFER_MS = 20000;
+const FALLBACK_VIDEO_DELAY_MS = 6000;
+// How much detection history to retain for matching (must exceed the worst
+// case video latency + |SYNC_OFFSET_MS| + tolerance).
+const BUFFER_MS = 30000;
 
 type Sample = { t: number; dets: any[] };
 
@@ -48,6 +49,9 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
   const [boxes, setBoxes] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isFs, setIsFs] = useState(false);
+  // Subtle latency readout (also a tuning aid for SYNC_OFFSET_MS).
+  const [stat, setStat] = useState<string>("");
+  const statAtRef = useRef(0);
 
   useEffect(() => {
     boxesRef.current = boxes;
@@ -146,18 +150,21 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
   useEffect(() => {
     let raf = 0;
 
-    const displayedWallMs = (video: HTMLVideoElement): number => {
+    const displayedWallMs = (
+      video: HTMLVideoElement,
+    ): { ms: number; src: string } => {
       const hls = hlsRef.current;
       if (hls && hls.playingDate) {
         const ms = hls.playingDate.getTime();
-        if (Number.isFinite(ms)) return ms;
+        if (Number.isFinite(ms)) return { ms, src: "pdt" };
       }
       const getStart = (video as any).getStartDate?.();
       if (getStart instanceof Date) {
         const startMs = getStart.getTime();
-        if (Number.isFinite(startMs)) return startMs + video.currentTime * 1000;
+        if (Number.isFinite(startMs))
+          return { ms: startMs + video.currentTime * 1000, src: "sd" };
       }
-      return Date.now() - FALLBACK_VIDEO_DELAY_MS;
+      return { ms: Date.now() - FALLBACK_VIDEO_DELAY_MS, src: "fb" };
     };
 
     const pickNearest = (target: number): any[] | null => {
@@ -189,8 +196,15 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.clearRect(0, 0, w, h);
+      const disp = displayedWallMs(video);
+      const now = Date.now();
+      if (now - statAtRef.current > 1000) {
+        statAtRef.current = now;
+        const vlat = ((now - disp.ms) / 1000).toFixed(1);
+        setStat(`v-lat ${vlat}s · ${disp.src} · off ${SYNC_OFFSET_MS / 1000}s`);
+      }
       if (!boxesRef.current) return;
-      const dets = pickNearest(displayedWallMs(video) + SYNC_OFFSET_MS);
+      const dets = pickNearest(disp.ms + SYNC_OFFSET_MS);
       if (!dets || !dets.length) return;
       ctx.strokeStyle = "#F59E0B";
       ctx.lineWidth = 2;
@@ -236,6 +250,11 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
 
       <div className="absolute top-2 left-3 mono uppercase tracking-[0.08em] text-[11px] text-white/90 drop-shadow">
         ● LIVE
+        {stat && (
+          <span className="ml-2 normal-case tracking-normal text-white/70">
+            {stat}
+          </span>
+        )}
       </div>
       <div className="absolute top-2 right-2 flex gap-2">
         <button onClick={() => setBoxes((b) => !b)} className="btn">
