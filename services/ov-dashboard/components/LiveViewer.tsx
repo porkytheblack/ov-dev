@@ -26,7 +26,7 @@ import Hls from "hls.js";
 // lookup target back in time selects the older, correct detection.
 // More negative => boxes drawn for an earlier moment (pull them back / make
 // them trail). Less negative / positive => boxes move ahead. Tune to taste.
-const SYNC_OFFSET_MS = -3500;
+const SYNC_OFFSET_MS = 0;
 // A buffered detection is "this frame's" only if within this of the target.
 const MATCH_TOLERANCE_MS = 2500;
 // Only used when the stream exposes no PDT (approx. HLS glass-to-glass).
@@ -42,6 +42,10 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  // Program-date-time anchor of the fragment currently playing: maps the
+  // media timeline (video.currentTime) to wall-clock. Far more reliable in
+  // LL-HLS than hls.playingDate, which mediamtx's sparse PDT tags leave null.
+  const fragRef = useRef<{ pdt: number; start: number } | null>(null);
   // Detections buffered by capture time (includes empty frames so "nothing
   // here at time T" is represented too).
   const bufRef = useRef<Sample[]>([]);
@@ -79,6 +83,15 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
       hlsRef.current = hls;
       hls.loadSource(src);
       hls.attachMedia(video);
+      const onFrag = (_e: unknown, data: any) => {
+        const f = data?.frag;
+        const pdt = f?.programDateTime;
+        if (f && typeof pdt === "number" && Number.isFinite(pdt)) {
+          fragRef.current = { pdt, start: f.start ?? 0 };
+        }
+      };
+      hls.on(Hls.Events.FRAG_CHANGED, onFrag);
+      hls.on(Hls.Events.FRAG_BUFFERED, onFrag);
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (data.fatal) {
           setError(`${data.type}: ${data.details}`);
@@ -92,6 +105,7 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
     return () => {
       hls?.destroy();
       hlsRef.current = null;
+      fragRef.current = null;
       video.removeAttribute("src");
       video.load();
     };
@@ -153,6 +167,10 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
     const displayedWallMs = (
       video: HTMLVideoElement,
     ): { ms: number; src: string } => {
+      const fr = fragRef.current;
+      if (fr && Number.isFinite(video.currentTime)) {
+        return { ms: fr.pdt + (video.currentTime - fr.start) * 1000, src: "frag" };
+      }
       const hls = hlsRef.current;
       if (hls && hls.playingDate) {
         const ms = hls.playingDate.getTime();
