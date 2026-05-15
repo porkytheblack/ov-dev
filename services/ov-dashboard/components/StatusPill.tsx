@@ -1,24 +1,34 @@
 export function StatusPill({ status }: { status: string }) {
-  const cls = (() => {
+  const { cls, dot } = (() => {
     switch (status) {
       case "open":
-        return "pill pill-open";
+        return { cls: "pill pill-open", dot: false };
       case "closed":
-        return "pill pill-closed";
+        return { cls: "pill pill-closed", dot: false };
       case "acknowledged":
-        return "pill pill-ack";
+        return { cls: "pill pill-ack", dot: false };
       case "suppressed":
-        return "pill pill-suppressed";
+        return { cls: "pill pill-suppressed", dot: false };
       case "online":
       case "live":
-        return "pill pill-live";
+        return { cls: "pill pill-live", dot: true };
       case "offline":
-        return "pill pill-offline";
+        return { cls: "pill pill-offline", dot: true };
       case "connecting":
-        return "pill pill-connecting";
+        return { cls: "pill pill-connecting", dot: true };
       default:
-        return "pill pill-closed";
+        return { cls: "pill pill-closed", dot: false };
     }
   })();
-  return <span className={cls}>{status.toUpperCase()}</span>;
+  return (
+    <span className={cls}>
+      {dot && (
+        <span
+          aria-hidden="true"
+          className="inline-block w-1.5 h-1.5 rounded-full bg-current"
+        />
+      )}
+      {status.toUpperCase()}
+    </span>
+  );
 }
