@@ -137,6 +137,12 @@ export function RoiCanvas({
 
   const dragRef = useRef<Drag>({ kind: "none" });
   const anchorRef = useRef<Pt | null>(null);
+  // The active geometry RoiCanvas actually draws. Updated SYNCHRONOUSLY in the
+  // pointer handlers so the box renders immediately, independent of the parent
+  // round-trip (setState → prop → passive effect → rAF). When idle it tracks
+  // the draftPolygon prop so parent-driven changes (select, discard, save,
+  // deep-link) still render.
+  const liveDraftRef = useRef<Pt[] | null>(draftPolygon);
   // Latest in-progress new rectangle, kept locally so the create/discard
   // decision on pointer-up never depends on draftPolygon round-tripping back.
   const pendingNewRectRef = useRef<Rect | null>(null);
@@ -188,8 +194,10 @@ export function RoiCanvas({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // DPR-sharp; draw in CSS px
     ctx.clearRect(0, 0, cssW, cssH);
 
-    const { rois: allRois, selectedRoiId: selId, draftPolygon: draft } =
-      stateRef.current;
+    const { rois: allRois, selectedRoiId: selId } = stateRef.current;
+    // Active geometry comes from the synchronously-updated ref, never the
+    // (async) prop — that is what made the box not render while dragging.
+    const draft = liveDraftRef.current;
 
     const drawPolygon = (
       poly: Pt[],
@@ -317,8 +325,22 @@ export function RoiCanvas({
     });
   }, [draw]);
 
-  // Redraw on any input change.
+  // Set the active geometry, repaint NOW, and inform the parent. Used by every
+  // interactive geometry change so the canvas never waits on the prop echo.
+  const pushDraft = useCallback(
+    (poly: Pt[] | null) => {
+      liveDraftRef.current = poly;
+      scheduleDraw();
+      cb.current.onDraftChange(poly);
+    },
+    [scheduleDraw],
+  );
+
+  // Redraw on any input change. While not mid-drag, keep the live ref in sync
+  // with the prop so parent-driven changes (select / discard / save / deep-
+  // link) render; during a drag the pointer handlers own the live ref.
   useEffect(() => {
+    if (dragRef.current.kind === "none") liveDraftRef.current = draftPolygon;
     scheduleDraw();
   }, [scheduleDraw, rois, selectedRoiId, draftPolygon, mode, imageReady, hoverId]);
 
@@ -353,7 +375,7 @@ export function RoiCanvas({
   }
 
   function hitHandle(p: Pt, w: number, h: number): Handle | null {
-    const draft = stateRef.current.draftPolygon;
+    const draft = liveDraftRef.current;
     if (!draft || !(isRect(draft) || draft.length === 4)) return null;
     const r = bbox(draft);
     if (!r) return null;
@@ -367,7 +389,7 @@ export function RoiCanvas({
   }
 
   function hitVertex(p: Pt, w: number, h: number): number | null {
-    const draft = stateRef.current.draftPolygon;
+    const draft = liveDraftRef.current;
     if (!draft || isRect(draft) || draft.length === 4) return null;
     const tolX = (VERTEX_PX + 6) / w;
     const tolY = (VERTEX_PX + 6) / h;
@@ -395,14 +417,15 @@ export function RoiCanvas({
     canvasRef.current?.focus();
     (e.target as Element).setPointerCapture?.(e.pointerId);
     const p = ptr(e);
-    const { draftPolygon: draft, mode: m } = stateRef.current;
+    const m = stateRef.current.mode;
+    const draft = liveDraftRef.current;
 
     // Draw mode: anchor a brand-new rectangle.
     if (m === "draw") {
       dragRef.current = { kind: "new" };
       anchorRef.current = { x: p.x, y: p.y };
       pendingNewRectRef.current = { x: p.x, y: p.y, w: 0, h: 0 };
-      cb.current.onDraftChange(rectToPoly({ x: p.x, y: p.y, w: 0, h: 0 }));
+      pushDraft(rectToPoly({ x: p.x, y: p.y, w: 0, h: 0 }));
       return;
     }
 
@@ -449,19 +472,19 @@ export function RoiCanvas({
         h: Math.abs(p.y - a.y),
       };
       pendingNewRectRef.current = nr;
-      cb.current.onDraftChange(rectToPoly(nr));
+      pushDraft(rectToPoly(nr));
       return;
     }
 
     // Move/resize/vertex edits operate on the existing draft geometry.
-    const draft = stateRef.current.draftPolygon;
+    const draft = liveDraftRef.current;
     if (!draft) return;
 
     if (d.kind === "vertex") {
       const next = draft.map((pt, i) =>
         i === d.i ? { x: clamp01(p.x), y: clamp01(p.y) } : pt,
       );
-      cb.current.onDraftChange(next);
+      pushDraft(next);
       return;
     }
 
@@ -471,9 +494,7 @@ export function RoiCanvas({
     if (d.kind === "move") {
       const nx = clamp01(Math.min(p.x - d.dx, 1 - r.w));
       const ny = clamp01(Math.min(p.y - d.dy, 1 - r.h));
-      cb.current.onDraftChange(
-        rectToPoly({ x: nx, y: ny, w: r.w, h: r.h }),
-      );
+      pushDraft(rectToPoly({ x: nx, y: ny, w: r.w, h: r.h }));
       return;
     }
 
@@ -492,7 +513,7 @@ export function RoiCanvas({
         w = right - x;
       }
       if (hd.includes("e")) w = Math.max(MIN, p.x - x);
-      cb.current.onDraftChange(
+      pushDraft(
         rectToPoly({
           x: clamp01(x),
           y: clamp01(y),
@@ -510,7 +531,7 @@ export function RoiCanvas({
     if (d.kind === "none") {
       // Hover highlight (only meaningful in select mode, off the draft).
       if (stateRef.current.mode === "select") {
-        const draft = stateRef.current.draftPolygon;
+        const draft = liveDraftRef.current;
         const overDraft = draft ? pointInPoly(p.x, p.y, draft) : false;
         const id = overDraft ? null : hitRoi(p);
         if (id !== hoverId) setHoverId(id);
@@ -540,16 +561,16 @@ export function RoiCanvas({
       pendingNewRectRef.current = null;
       if (!r || r.w < MIN || r.h < MIN) {
         // Click without a real drag — discard the empty rect, stay in draw.
-        cb.current.onDraftChange(null);
+        pushDraft(null);
       } else {
-        cb.current.onDraftChange(rectToPoly(r));
+        pushDraft(rectToPoly(r));
         cb.current.onAddComplete();
       }
     }
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
-    const draft = stateRef.current.draftPolygon;
+    const draft = liveDraftRef.current;
     if (e.key === "Escape") {
       e.preventDefault();
       cb.current.onSelect(null);
@@ -573,9 +594,7 @@ export function RoiCanvas({
     dx = Math.max(-minX, Math.min(dx, 1 - maxX));
     dy = Math.max(-minY, Math.min(dy, 1 - maxY));
     if (dx === 0 && dy === 0) return;
-    cb.current.onDraftChange(
-      draft.map((p) => ({ x: p.x + dx, y: p.y + dy })),
-    );
+    pushDraft(draft.map((p) => ({ x: p.x + dx, y: p.y + dy })));
   }
 
   const cursor =
