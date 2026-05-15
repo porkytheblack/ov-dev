@@ -245,8 +245,8 @@ export default function SetupPage() {
   }
 
   async function saveRoi() {
-    if (!poly) {
-      setErr("Draw and close a polygon on the snapshot first.");
+    if (!poly || poly.length < 3) {
+      setErr("Draw a region: drag a box on the snapshot.");
       return;
     }
     if (selected.length === 0) {
@@ -290,12 +290,8 @@ export default function SetupPage() {
     <>
       <Nav />
       <main className="max-w-6xl mx-auto px-4 py-6">
-        <div className="mb-4">
-          <h1 className="text-[18px]">Camera setup</h1>
-          <p className="text-text-dim text-[12px] mt-1">
-            Configure the camera connection, then draw one or more regions of
-            interest (ROIs) and choose what triggers an incident.
-          </p>
+        <div className="mb-5">
+          <h1 className="text-[18px]">{camName || "Camera setup"}</h1>
         </div>
 
         {/* ── Section 1: Camera settings ─────────────────────────── */}
@@ -345,14 +341,11 @@ export default function SetupPage() {
               <label className="label" htmlFor="cam-desc">Description</label>
               <textarea
                 id="cam-desc"
-                className="input-text h-20"
+                className="input-text h-16"
                 value={camDescription}
                 onChange={(e) => setCamDescription(e.target.value)}
-                placeholder="What this camera sees and where it is — e.g. 'mounted above the front door, facing the driveway and street'. Used as context by the VLM when summarizing incidents."
+                placeholder="What this camera sees and where it is. Used as VLM context."
               />
-              <span className="text-text-dim text-[10px]">
-                Plain language. Helps the VLM describe what it is looking at.
-              </span>
             </div>
             <div className="field">
               <label className="label" htmlFor="cam-fps">
@@ -370,12 +363,8 @@ export default function SetupPage() {
                 />
               </div>
               <span className="text-text-dim text-[10px] leading-snug">
-                How many frames per second are sent to the AI detector — <b>not</b>{" "}
-                the camera&apos;s stream FPS shown by Probe. The CPU detector
-                processes only a few FPS total across all cameras, so keep this
-                low (3–8 is plenty to catch a person). Higher values just queue
-                frames that get dropped — they do not make detection more
-                responsive. Restarts the stream; takes effect within ~15s.
+                Frames/sec sent to the detector (not the stream FPS). Keep low —
+                3–8 is plenty. Restarts the stream (~15s).
               </span>
             </div>
             <div className="field">
@@ -464,12 +453,8 @@ export default function SetupPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
             <div className="card">
-              <div className="label mb-3">Draw region of interest</div>
-              <p className="text-text-dim text-[12px] mb-3">
-                Click on the snapshot to add polygon points, then double-click
-                (or “Close polygon”) to finish the shape.
-              </p>
-              <RoiEditor cameraId={id} onSave={(p) => setPoly(p)} />
+              <div className="label mb-3">Region of interest</div>
+              <RoiEditor cameraId={id} onChange={(p) => setPoly(p)} />
             </div>
           </div>
 
@@ -490,10 +475,10 @@ export default function SetupPage() {
               <label className="label" htmlFor="roi-desc">ROI description</label>
               <textarea
                 id="roi-desc"
-                className="input-text h-20"
+                className="input-text h-16"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="What this region covers — e.g. 'the driveway between the gate and the carport'. Used by the VLM when summarizing incidents in this ROI."
+                placeholder="What this region covers (optional). VLM context."
               />
             </div>
 
