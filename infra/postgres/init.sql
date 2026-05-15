@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS cameras (
   -- sample_fps (detection sampling rate). Drives the transcoder GOP so LL-HLS
   -- parts land on keyframes.
   stream_fps REAL,
+  -- Human-readable description of what this camera covers; used as VLM context.
+  description TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'connecting',
   last_frame_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -207,6 +209,7 @@ CREATE TRIGGER camera_change_trigger
 -- `make migrate` re-pipes it so existing volumes pick up new columns.
 -- ============================================================================
 ALTER TABLE rois ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+ALTER TABLE cameras ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
 
 -- Cascade incident deletes when a camera or ROI is removed. Postgres names
 -- auto-generated FKs <table>_<col>_fkey; drop-then-add is idempotent.

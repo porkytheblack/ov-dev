@@ -39,6 +39,8 @@ export const cameras = pgTable("cameras", {
   frameContext: jsonb("frame_context").notNull().default(sql`'{}'::jsonb`),
   vlmEnabled: boolean("vlm_enabled").notNull().default(false),
   sampleFps: integer("sample_fps").notNull().default(25),
+  streamFps: real("stream_fps"),
+  description: text("description").notNull().default(""),
   status: text("status").notNull().default("connecting"),
   lastFrameAt: timestamp("last_frame_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

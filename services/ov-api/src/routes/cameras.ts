@@ -70,6 +70,7 @@ export function makeCameraRoutes(sql: ReturnType<typeof postgres>) {
     sample_fps: z.number().int().min(1).max(60).optional(),
     frame_context: z.record(z.any()).optional(),
     vlm_enabled: z.boolean().optional(),
+    description: z.string().max(2000).optional(),
   });
   const cameraPatch = cameraInput.partial();
 
@@ -77,7 +78,7 @@ export function makeCameraRoutes(sql: ReturnType<typeof postgres>) {
     const rows = await sql<any[]>`
       SELECT id, name, rtsp_url, enabled, sample_fps, stream_fps, status,
              last_frame_at, frame_context, vlm_enabled, frame_width,
-             frame_height, created_at
+             frame_height, description, created_at
         FROM cameras ORDER BY name
     `;
     return c.json({ cameras: rows });
@@ -87,12 +88,13 @@ export function makeCameraRoutes(sql: ReturnType<typeof postgres>) {
     const body = c.req.valid("json");
     const id = uuid();
     await sql`
-      INSERT INTO cameras (id, name, rtsp_url, sample_fps, frame_context, vlm_enabled)
+      INSERT INTO cameras (id, name, rtsp_url, sample_fps, frame_context, vlm_enabled, description)
       VALUES (
         ${id}, ${body.name}, ${body.rtsp_url},
         ${body.sample_fps ?? 5},
         ${JSON.stringify(body.frame_context ?? {})}::jsonb,
-        ${body.vlm_enabled ?? false}
+        ${body.vlm_enabled ?? false},
+        ${body.description ?? ''}
       )
     `;
     // Auto-probe the stream so the transcoder GOP and the dashboard aspect
@@ -128,6 +130,7 @@ export function makeCameraRoutes(sql: ReturnType<typeof postgres>) {
     const fps = b.sample_fps ?? null;
     const vlm = b.vlm_enabled ?? null;
     const fc = b.frame_context !== undefined ? JSON.stringify(b.frame_context) : null;
+    const desc = b.description !== undefined ? b.description : null;
     // A new RTSP URL can change resolution/fps — re-probe so the transcoder
     // and aspect ratio stay correct.
     const reprobe = rtsp ? await probeRtsp(rtsp) : {};
@@ -141,11 +144,12 @@ export function makeCameraRoutes(sql: ReturnType<typeof postgres>) {
              stream_fps    = COALESCE(${reprobe.fps ?? null}, stream_fps),
              frame_width   = COALESCE(${reprobe.width ?? null}, frame_width),
              frame_height  = COALESCE(${reprobe.height ?? null}, frame_height),
+             description   = COALESCE(${desc}, description),
              updated_at    = now()
        WHERE id = ${id}::uuid
        RETURNING id, name, rtsp_url, enabled, sample_fps, stream_fps, status,
                  last_frame_at, frame_context, vlm_enabled, frame_width,
-                 frame_height, created_at, updated_at
+                 frame_height, description, created_at, updated_at
     `;
     if (rows.length === 0) return c.json({ error: "not found" }, 404);
     return c.json({ ok: true, camera: rows[0] });

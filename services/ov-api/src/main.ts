@@ -26,6 +26,7 @@ const sql = postgres(
 // up on the next restart without a migration runner or manual psql.
 async function ensureSchema(): Promise<void> {
   await sql`ALTER TABLE cameras ADD COLUMN IF NOT EXISTS stream_fps REAL`;
+  await sql`ALTER TABLE cameras ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''`;
 }
 await ensureSchema().catch((err) =>
   log.error({ err }, "schema bootstrap failed"),
