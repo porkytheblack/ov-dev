@@ -27,6 +27,10 @@ CREATE TABLE IF NOT EXISTS cameras (
   frame_context JSONB NOT NULL DEFAULT '{}'::jsonb,
   vlm_enabled BOOLEAN NOT NULL DEFAULT false,
   sample_fps INT NOT NULL DEFAULT 25,
+  -- Native stream frame rate, auto-probed via ffprobe on add. Distinct from
+  -- sample_fps (detection sampling rate). Drives the transcoder GOP so LL-HLS
+  -- parts land on keyframes.
+  stream_fps REAL,
   status TEXT NOT NULL DEFAULT 'connecting',
   last_frame_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

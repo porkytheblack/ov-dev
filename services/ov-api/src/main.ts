@@ -21,6 +21,16 @@ const sql = postgres(
   { max: 10 },
 );
 
+// infra/postgres/init.sql only runs on a fresh data volume. Additive,
+// idempotent column adds are applied here so existing deployments pick them
+// up on the next restart without a migration runner or manual psql.
+async function ensureSchema(): Promise<void> {
+  await sql`ALTER TABLE cameras ADD COLUMN IF NOT EXISTS stream_fps REAL`;
+}
+await ensureSchema().catch((err) =>
+  log.error({ err }, "schema bootstrap failed"),
+);
+
 const app = new Hono();
 
 app.use("*", cors({ origin: (origin) => origin ?? "*", credentials: true }));

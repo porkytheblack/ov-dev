@@ -12,8 +12,8 @@
 import postgres from "postgres";
 
 export async function renderMediamtxYml(sql: ReturnType<typeof postgres>): Promise<string> {
-  const rows = await sql<Array<{ id: string; rtsp_url: string }>>`
-    SELECT id, rtsp_url FROM cameras WHERE enabled = true
+  const rows = await sql<Array<{ id: string; rtsp_url: string; stream_fps: number | null }>>`
+    SELECT id, rtsp_url, stream_fps FROM cameras WHERE enabled = true
   `;
 
   // Per-camera transcode pipeline. We don't use $MTX_PATH substitution
@@ -21,16 +21,18 @@ export async function renderMediamtxYml(sql: ReturnType<typeof postgres>): Promi
   // single (undefined) variable and feed ffmpeg an empty path. Hardcoding
   // both source and sink names per camera keeps the substitution surface
   // zero. Audio dropped (-an): Hikvision G.711 blows up libx264's muxing
-  // queue. GOP = fps so LL-HLS parts can align on keyframes. baseline
-  // profile + yuv420p maximises Chrome/Firefox compat.
-  function transcodeCmd(slug: string): string {
+  // queue. GOP = the camera's probed fps so LL-HLS parts align on keyframes
+  // regardless of whether the source runs 12/15/25/30 fps. baseline profile
+  // + yuv420p maximises Chrome/Firefox compat.
+  function transcodeCmd(slug: string, fps: number): string {
+    const gop = Math.max(1, Math.round(fps));
     return (
       "ffmpeg -rtsp_transport tcp -fflags nobuffer -flags low_delay " +
       `-i rtsp://127.0.0.1:8554/cam_${slug}_raw ` +
       "-map 0:v:0 -an " +
       "-c:v libx264 -preset ultrafast -tune zerolatency " +
       "-profile:v baseline -level 4.1 -pix_fmt yuv420p " +
-      "-g 25 -keyint_min 25 -sc_threshold 0 " +
+      `-g ${gop} -keyint_min ${gop} -sc_threshold 0 ` +
       "-b:v 1500k -maxrate 1500k -bufsize 1500k " +
       `-f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/cam_${slug}`
     );
@@ -39,6 +41,9 @@ export async function renderMediamtxYml(sql: ReturnType<typeof postgres>): Promi
   const paths = rows
     .flatMap((r) => {
       const slug = r.id.replaceAll("-", "_");
+      // Fall back to 25 when the camera hasn't been probed yet (offline at
+      // add-time); a later restart picks up the real value.
+      const fps = r.stream_fps && r.stream_fps > 0 ? r.stream_fps : 25;
       return [
         `  cam_${slug}_raw:`,
         `    source: ${r.rtsp_url}`,
@@ -46,7 +51,7 @@ export async function renderMediamtxYml(sql: ReturnType<typeof postgres>): Promi
         `    sourceOnDemandCloseAfter: 30s`,
         `  cam_${slug}:`,
         `    source: publisher`,
-        `    runOnDemand: ${transcodeCmd(slug)}`,
+        `    runOnDemand: ${transcodeCmd(slug, fps)}`,
         `    runOnDemandRestart: yes`,
         `    runOnDemandStartTimeout: 10s`,
         `    runOnDemandCloseAfter: 10s`,
