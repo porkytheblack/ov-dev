@@ -5,6 +5,60 @@ import { useParams, useRouter } from "next/navigation";
 import { Nav } from "@/components/Nav";
 import { RoiEditor } from "@/components/RoiEditor";
 
+// Day-of-week numbering MUST match the incident engine's
+// isWithinDetectionWindow (services/ov-incident-engine/src/matching/geometry.ts):
+// Sun=0, Mon=1, Tue=2, Wed=3, Thu=4, Fri=5, Sat=6.
+const DAYS: { label: string; value: number }[] = [
+  { label: "Mon", value: 1 },
+  { label: "Tue", value: 2 },
+  { label: "Wed", value: 3 },
+  { label: "Thu", value: 4 },
+  { label: "Fri", value: 5 },
+  { label: "Sat", value: 6 },
+  { label: "Sun", value: 0 },
+];
+
+const DAY_LABEL: Record<number, string> = {
+  0: "Sun",
+  1: "Mon",
+  2: "Tue",
+  3: "Wed",
+  4: "Thu",
+  5: "Fri",
+  6: "Sat",
+};
+
+type DetectionWindow =
+  | { type: "always" }
+  | { type: "time"; start: string; end: string; tz: string; days: number[] };
+
+function browserTz(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+/** Human-readable summary of a stored detection_window for the ROI table. */
+function summarizeWindow(w: unknown): string {
+  if (!w || typeof w !== "object") return "Always";
+  const dw = w as Partial<DetectionWindow> & { type?: string };
+  if (dw.type !== "time") return "Always";
+  const days = Array.isArray(dw.days) ? (dw.days as number[]) : [];
+  let dayStr = "Every day";
+  if (days.length > 0 && days.length < 7) {
+    const sorted = [...days].sort((a, b) => {
+      // Order Mon..Sun for display.
+      const order = (d: number) => (d === 0 ? 7 : d);
+      return order(a) - order(b);
+    });
+    dayStr = sorted.map((d) => DAY_LABEL[d] ?? d).join(", ");
+  }
+  const tz = dw.tz || "UTC";
+  return `${dayStr} ${dw.start ?? "?"}–${dw.end ?? "?"} (${tz})`;
+}
+
 export default function SetupPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -19,10 +73,18 @@ export default function SetupPage() {
   const [rois, setRois] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
+  // ROI detection-window form state.
+  const [windowed, setWindowed] = useState(false);
+  const [winStart, setWinStart] = useState("18:00");
+  const [winEnd, setWinEnd] = useState("06:00");
+  const [winTz, setWinTz] = useState(browserTz());
+  const [winDays, setWinDays] = useState<number[]>([1, 2, 3, 4, 5]);
+
   // Camera-level fields.
   const [camera, setCamera] = useState<any>(null);
   const [camName, setCamName] = useState("");
   const [camRtsp, setCamRtsp] = useState("");
+  const [camDescription, setCamDescription] = useState("");
   const [camFps, setCamFps] = useState(25);
   const [camVlm, setCamVlm] = useState(false);
   const [camSaving, setCamSaving] = useState(false);
@@ -39,6 +101,7 @@ export default function SetupPage() {
     setCamera(c);
     setCamName(c?.name ?? "");
     setCamRtsp(c?.rtsp_url ?? "");
+    setCamDescription(c?.description ?? "");
     setCamFps(Number(c?.sample_fps ?? 25));
     setCamVlm(Boolean(c?.vlm_enabled));
   }
@@ -53,6 +116,7 @@ export default function SetupPage() {
         body: JSON.stringify({
           name: camName.trim(),
           rtsp_url: camRtsp.trim(),
+          description: camDescription,
           sample_fps: camFps,
           vlm_enabled: camVlm,
         }),
@@ -77,6 +141,7 @@ export default function SetupPage() {
     camera !== null &&
     (camera.name !== camName ||
       camera.rtsp_url !== camRtsp ||
+      (camera.description ?? "") !== camDescription ||
       Number(camera.sample_fps) !== camFps ||
       Boolean(camera.vlm_enabled) !== camVlm);
 
@@ -167,9 +232,29 @@ export default function SetupPage() {
       });
   }, [id]);
 
+  function buildDetectionWindow(): DetectionWindow {
+    if (!windowed) return { type: "always" };
+    return {
+      type: "time",
+      start: winStart,
+      end: winEnd,
+      tz: winTz.trim() || "UTC",
+      // Engine numbering: Sun=0..Sat=6. Empty array => engine treats as every day.
+      days: [...winDays].sort((a, b) => a - b),
+    };
+  }
+
   async function saveRoi() {
     if (!poly) {
-      setErr("Draw a polygon first.");
+      setErr("Draw and close a polygon on the snapshot first.");
+      return;
+    }
+    if (selected.length === 0) {
+      setErr("Pick at least one class of interest.");
+      return;
+    }
+    if (windowed && (!winStart || !winEnd)) {
+      setErr("Set both a start and end time for the detection window.");
       return;
     }
     setErr(null);
@@ -181,6 +266,7 @@ export default function SetupPage() {
       match_mode: mode,
       linger_threshold_seconds: linger,
       notify_enabled: true,
+      detection_window: buildDetectionWindow(),
     };
     const r = await fetch(`/api/cameras/${id}/rois`, {
       method: "POST",
@@ -194,18 +280,29 @@ export default function SetupPage() {
     router.push(`/cameras/${id}`);
   }
 
+  function toggleDay(d: number) {
+    setWinDays((cur) =>
+      cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d],
+    );
+  }
+
   return (
     <>
       <Nav />
       <main className="max-w-6xl mx-auto px-4 py-6">
-        <h1 className="text-[18px] mb-4">Camera setup</h1>
+        <div className="mb-4">
+          <h1 className="text-[18px]">Camera setup</h1>
+          <p className="text-text-dim text-[12px] mt-1">
+            Configure the camera connection, then draw one or more regions of
+            interest (ROIs) and choose what triggers an incident.
+          </p>
+        </div>
 
+        {/* ── Section 1: Camera settings ─────────────────────────── */}
         <section className="card mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px]">
-              CAMERA SETTINGS
-            </div>
-            <div className="flex items-center gap-3 font-mono text-[11px]">
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <div className="label">Camera settings</div>
+            <div className="flex items-center gap-3 text-[11px]">
               <span className={`pill ${
                 camera?.status === "online"
                   ? "pill-live"
@@ -215,68 +312,85 @@ export default function SetupPage() {
               }`}>
                 {(camera?.status ?? "unknown").toUpperCase()}
               </span>
-              <span className="text-text-dim">
+              <span className="text-text-dim mono">
                 {camera?.last_frame_at
                   ? `last frame ${new Date(camera.last_frame_at).toISOString().slice(11, 19)}`
                   : "no frames received"}
               </span>
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label className="block">
-              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">
-                NAME
-              </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="field">
+              <label className="label" htmlFor="cam-name">Name</label>
               <input
-                className="input-text w-full"
+                id="cam-name"
+                className="input-text"
                 value={camName}
                 onChange={(e) => setCamName(e.target.value)}
                 placeholder="Front gate"
               />
-            </label>
-            <label className="block">
-              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">
-                RTSP URL
-              </div>
+            </div>
+            <div className="field">
+              <label className="label" htmlFor="cam-rtsp">RTSP URL</label>
               <input
-                className="input w-full"
+                id="cam-rtsp"
+                className="input"
                 value={camRtsp}
                 onChange={(e) => setCamRtsp(e.target.value)}
                 placeholder="rtsp://user:pass@host:554/Streaming/Channels/101"
               />
-            </label>
-            <label className="block">
-              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">
-                SAMPLE FPS
-              </div>
-              <input
-                type="number"
-                min={1}
-                max={60}
-                className="input w-32"
-                value={camFps}
-                onChange={(e) => setCamFps(Number(e.target.value))}
+            </div>
+            <div className="field md:col-span-2">
+              <label className="label" htmlFor="cam-desc">Description</label>
+              <textarea
+                id="cam-desc"
+                className="input-text h-20"
+                value={camDescription}
+                onChange={(e) => setCamDescription(e.target.value)}
+                placeholder="What this camera sees and where it is — e.g. 'mounted above the front door, facing the driveway and street'. Used as context by the VLM when summarizing incidents."
               />
-              <div className="font-mono text-[10px] text-text-dim mt-1">
-                Restarts the stream; takes effect within ~15s.
-              </div>
-            </label>
-            <label className="flex items-center gap-2 select-none">
-              <input
-                type="checkbox"
-                checked={camVlm}
-                onChange={(e) => setCamVlm(e.target.checked)}
-              />
-              <span className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px]">
-                VLM SUMMARIES
+              <span className="text-text-dim text-[10px]">
+                Plain language. Helps the VLM describe what it is looking at.
               </span>
-            </label>
+            </div>
+            <div className="field">
+              <label className="label" htmlFor="cam-fps">Sample FPS</label>
+              <div className="w-32">
+                <input
+                  id="cam-fps"
+                  type="number"
+                  min={1}
+                  max={60}
+                  className="input"
+                  value={camFps}
+                  onChange={(e) => setCamFps(Number(e.target.value))}
+                />
+              </div>
+              <span className="text-text-dim text-[10px]">
+                Restarts the stream; takes effect within ~15s.
+              </span>
+            </div>
+            <div className="field">
+              <span className="label">Analysis</span>
+              <label className="flex items-center gap-2 select-none h-9">
+                <input
+                  type="checkbox"
+                  checked={camVlm}
+                  onChange={(e) => setCamVlm(e.target.checked)}
+                />
+                <span className="text-[12px]">
+                  Generate VLM summaries for incidents on this camera
+                </span>
+              </label>
+            </div>
           </div>
+
           {camErr && (
-            <div className="mt-3 font-mono text-[11px] text-danger">{camErr}</div>
+            <div className="mt-3 mono text-[11px] text-danger">{camErr}</div>
           )}
           {testResult && (
-            <div className={`mt-3 font-mono text-[11px] ${
+            <div className={`mt-3 mono text-[11px] ${
               testResult.ok ? "text-success" : "text-danger"
             }`}>
               {testResult.ok ? (
@@ -291,14 +405,15 @@ export default function SetupPage() {
               )}
             </div>
           )}
-          <div className="flex items-center gap-2 mt-3">
+
+          <div className="flex items-center gap-2 mt-4 flex-wrap">
             <button
               type="button"
               className="btn-primary"
               disabled={!camDirty || camSaving || !camName.trim() || !camRtsp.trim()}
               onClick={saveCamera}
             >
-              {camSaving ? "SAVING…" : "SAVE CHANGES"}
+              {camSaving ? "Saving…" : "Save changes"}
             </button>
             {camera && (
               <button
@@ -307,7 +422,7 @@ export default function SetupPage() {
                 disabled={!camDirty || camSaving}
                 onClick={() => hydrateCamera(camera)}
               >
-                REVERT
+                Revert
               </button>
             )}
             <button
@@ -316,109 +431,282 @@ export default function SetupPage() {
               disabled={!camRtsp.trim() || testing}
               onClick={testConnection}
             >
-              {testing ? "PROBING…" : "PROBE RTSP"}
+              {testing ? "Probing…" : "Probe RTSP"}
             </button>
             {camSavedAt && !camDirty && (
-              <span className="font-mono text-[11px] text-success">SAVED</span>
+              <span className="mono text-[11px] text-success">Saved</span>
             )}
             <div className="flex-1" />
             <button
               type="button"
-              className="btn"
-              style={{ borderColor: "var(--danger)", color: "var(--danger)" }}
+              className="btn-danger"
               disabled={deleting}
               onClick={deleteCamera}
             >
-              {deleting ? "DELETING…" : "DELETE CAMERA"}
+              {deleting ? "Deleting…" : "Delete camera"}
             </button>
           </div>
         </section>
 
+        {/* ── Section 2 + 3: Draw ROI  +  ROI properties ─────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
-            <RoiEditor cameraId={id} onSave={(p) => setPoly(p)} />
+            <div className="card">
+              <div className="label mb-3">Draw region of interest</div>
+              <p className="text-text-dim text-[12px] mb-3">
+                Click on the snapshot to add polygon points, then double-click
+                (or “Close polygon”) to finish the shape.
+              </p>
+              <RoiEditor cameraId={id} onSave={(p) => setPoly(p)} />
+            </div>
           </div>
-          <div className="card space-y-3">
-            <label className="block">
-              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">ROI NAME</div>
-              <input className="input-text w-full" value={name} onChange={(e) => setName(e.target.value)} />
-            </label>
-            <label className="block">
-              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">
-                ROI DESCRIPTION
-              </div>
+
+          <div className="card space-y-4">
+            <div className="label">ROI properties</div>
+
+            <div className="field">
+              <label className="label" htmlFor="roi-name">ROI name</label>
+              <input
+                id="roi-name"
+                className="input-text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+
+            <div className="field">
+              <label className="label" htmlFor="roi-desc">ROI description</label>
               <textarea
-                className="input-text w-full h-20"
+                id="roi-desc"
+                className="input-text h-20"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="What this region covers — e.g. 'the driveway between the gate and the carport'. Used by the VLM when summarizing incidents in this ROI."
               />
-            </label>
-            <div>
-              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">CLASSES OF INTEREST</div>
-              <div className="flex flex-wrap gap-1">
+            </div>
+
+            <div className="field">
+              <span className="label">Classes of interest</span>
+              <div className="flex flex-wrap gap-1.5">
                 {classes.map((cls) => {
                   const active = selected.includes(cls);
                   return (
                     <button
                       key={cls}
                       type="button"
+                      aria-pressed={active}
                       onClick={() =>
                         setSelected((s) => (s.includes(cls) ? s.filter((c) => c !== cls) : [...s, cls]))
                       }
-                      className={`font-mono text-[11px] px-2 h-6 border ${
-                        active ? "border-accent text-accent" : "border-border text-text-muted"
-                      }`}
+                      className="inline-flex items-center justify-center min-h-8 px-3 rounded mono text-[11px] border whitespace-nowrap transition-colors"
+                      style={
+                        active
+                          ? {
+                              borderColor: "var(--accent)",
+                              color: "var(--accent)",
+                              backgroundColor: "var(--accent-soft)",
+                            }
+                          : undefined
+                      }
                     >
                       {cls}
                     </button>
                   );
                 })}
               </div>
+              <span className="text-text-dim text-[10px]">
+                An incident fires when one of these object types lingers in the ROI.
+              </span>
             </div>
-            <label className="block">
-              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">LINGER THRESHOLD (S)</div>
-              <input
-                type="number"
-                min={0}
-                className="input w-24"
-                value={linger}
-                onChange={(e) => setLinger(Number(e.target.value))}
-              />
-            </label>
-            <div>
-              <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">MATCH MODE</div>
-              <div className="flex gap-2">
-                {(["centroid", "iou"] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setMode(m)}
-                    className={`font-mono text-[11px] px-2 h-6 border ${
-                      mode === m ? "border-accent text-accent" : "border-border text-text-muted"
-                    }`}
-                  >
-                    {m.toUpperCase()}
-                  </button>
-                ))}
+
+            <div className="field">
+              <label className="label" htmlFor="roi-linger">Linger threshold (seconds)</label>
+              <div className="w-24">
+                <input
+                  id="roi-linger"
+                  type="number"
+                  min={0}
+                  className="input"
+                  value={linger}
+                  onChange={(e) => setLinger(Number(e.target.value))}
+                />
               </div>
+              <span className="text-text-dim text-[10px]">
+                How long an object must stay before it counts as an incident.
+              </span>
             </div>
-            {err && <div className="font-mono text-[11px] text-danger">{err}</div>}
-            <div className="flex justify-end pt-2">
-              <button className="btn-primary" type="button" onClick={saveRoi}>SAVE ROI</button>
+
+            <div className="field">
+              <span className="label">Match mode</span>
+              <div className="flex gap-2">
+                {(["centroid", "iou"] as const).map((m) => {
+                  const active = mode === m;
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setMode(m)}
+                      className="inline-flex items-center justify-center min-h-8 px-3 rounded mono text-[11px] border whitespace-nowrap transition-colors"
+                      style={
+                        active
+                          ? {
+                              borderColor: "var(--accent)",
+                              color: "var(--accent)",
+                              backgroundColor: "var(--accent-soft)",
+                            }
+                          : undefined
+                      }
+                    >
+                      {m.toUpperCase()}
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="text-text-dim text-[10px]">
+                Centroid: object center inside the ROI. IoU: bounding box overlaps the ROI.
+              </span>
+            </div>
+
+            {/* ── ROI active time range ────────────────────────── */}
+            <div className="field">
+              <span className="label">Active time range</span>
+              <div className="flex gap-2">
+                {[
+                  { v: false, t: "Always active" },
+                  { v: true, t: "During a time window" },
+                ].map((opt) => {
+                  const active = windowed === opt.v;
+                  return (
+                    <button
+                      key={String(opt.v)}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setWindowed(opt.v)}
+                      className="inline-flex items-center justify-center min-h-8 px-3 rounded text-[11px] border whitespace-nowrap transition-colors"
+                      style={
+                        active
+                          ? {
+                              borderColor: "var(--accent)",
+                              color: "var(--accent)",
+                              backgroundColor: "var(--accent-soft)",
+                            }
+                          : undefined
+                      }
+                    >
+                      {opt.t}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {windowed && (
+                <div className="mt-2 space-y-3 border border-border rounded p-3 bg-surface">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="field">
+                      <label className="label" htmlFor="win-start">Start</label>
+                      <input
+                        id="win-start"
+                        type="time"
+                        className="input"
+                        value={winStart}
+                        onChange={(e) => setWinStart(e.target.value)}
+                      />
+                    </div>
+                    <div className="field">
+                      <label className="label" htmlFor="win-end">End</label>
+                      <input
+                        id="win-end"
+                        type="time"
+                        className="input"
+                        value={winEnd}
+                        onChange={(e) => setWinEnd(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="field">
+                    <span className="label">Active on</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {DAYS.map((d) => {
+                        const active = winDays.includes(d.value);
+                        return (
+                          <button
+                            key={d.value}
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => toggleDay(d.value)}
+                            className="inline-flex items-center justify-center min-h-8 w-12 rounded mono text-[11px] border whitespace-nowrap transition-colors"
+                            style={
+                              active
+                                ? {
+                                    borderColor: "var(--accent)",
+                                    color: "var(--accent)",
+                                    backgroundColor: "var(--accent-soft)",
+                                  }
+                                : undefined
+                            }
+                          >
+                            {d.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <span className="text-text-dim text-[10px]">
+                      {winDays.length === 0
+                        ? "No days selected — the ROI will be active every day."
+                        : "ROI is only active on the selected days."}
+                    </span>
+                  </div>
+
+                  <div className="field">
+                    <label className="label" htmlFor="win-tz">Timezone</label>
+                    <input
+                      id="win-tz"
+                      className="input"
+                      value={winTz}
+                      onChange={(e) => setWinTz(e.target.value)}
+                      placeholder="Africa/Nairobi"
+                    />
+                    <span className="text-text-dim text-[10px]">
+                      IANA name. Start/end times are interpreted in this timezone.
+                      An end before the start wraps past midnight
+                      (e.g. 18:00 → 06:00 = overnight).
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {err && <div className="mono text-[11px] text-danger">{err}</div>}
+            <div className="flex justify-end pt-1">
+              <button className="btn-primary" type="button" onClick={saveRoi}>
+                Save ROI
+              </button>
             </div>
           </div>
         </div>
 
+        {/* ── Section 4: Existing ROIs ───────────────────────────── */}
         <section className="mt-6">
-          <div className="font-mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-2">EXISTING ROIS</div>
+          <div className="label mb-2">Existing ROIs</div>
           <div className="card p-0">
             <table className="ov">
               <thead>
-                <tr><th>NAME</th><th>DESCRIPTION</th><th>CLASSES</th><th>MODE</th><th>LINGER</th><th>NOTIFY</th></tr>
+                <tr>
+                  <th>NAME</th>
+                  <th>DESCRIPTION</th>
+                  <th>CLASSES</th>
+                  <th>MODE</th>
+                  <th>LINGER</th>
+                  <th>ACTIVE WINDOW</th>
+                  <th>NOTIFY</th>
+                </tr>
               </thead>
               <tbody>
-                {rois.length === 0 && <tr><td colSpan={6} className="text-text-muted">None.</td></tr>}
+                {rois.length === 0 && (
+                  <tr><td colSpan={7} className="text-text-muted">No ROIs yet.</td></tr>
+                )}
                 {rois.map((r: any) => (
                   <tr key={r.id}>
                     <td>{r.name}</td>
@@ -426,6 +714,7 @@ export default function SetupPage() {
                     <td className="mono">{(r.classes_of_interest ?? []).join(", ")}</td>
                     <td className="mono">{r.match_mode}</td>
                     <td className="mono">{r.linger_threshold_seconds}s</td>
+                    <td className="mono">{summarizeWindow(r.detection_window)}</td>
                     <td className="mono">{r.notify_enabled ? "yes" : "no"}</td>
                   </tr>
                 ))}

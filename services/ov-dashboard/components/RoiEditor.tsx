@@ -124,20 +124,25 @@ export function RoiEditor({
           onDoubleClick={handleDoubleClick}
         />
       </div>
-      <div className="flex items-center gap-2 mt-2">
-        <button className="btn" type="button" onClick={() => { setPoly([]); setClosed(false); }}>
-          RESET
+      <div className="flex items-center gap-2 mt-3 flex-wrap">
+        <button
+          className="btn"
+          type="button"
+          disabled={poly.length === 0}
+          onClick={() => { setPoly([]); setClosed(false); }}
+        >
+          Reset
         </button>
         <button
           className="btn"
           type="button"
-          disabled={poly.length < 3}
+          disabled={poly.length < 3 || closed}
           onClick={handleDoubleClick}
         >
-          CLOSE POLYGON
+          Close polygon
         </button>
         <button className="btn" type="button" onClick={refresh}>
-          REFRESH FRAME
+          Refresh frame
         </button>
         <button
           className="btn-primary"
@@ -145,10 +150,11 @@ export function RoiEditor({
           disabled={!closed}
           onClick={() => onSave(poly)}
         >
-          SAVE ROI
+          Use this shape
         </button>
-        <span className="font-mono text-[11px] text-text-dim ml-auto">
-          {poly.length} pts {closed ? "· closed" : "· click to add, double-click to close"}
+        <span className="mono text-[11px] text-text-dim ml-auto">
+          {poly.length} pt{poly.length === 1 ? "" : "s"}
+          {closed ? " · closed" : " · click to add, double-click to close"}
         </span>
       </div>
     </div>
