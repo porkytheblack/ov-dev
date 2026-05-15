@@ -17,9 +17,11 @@ const DETECTION_HOLD_MS = 2000;
 export function LiveViewer({ cameraId }: { cameraId: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const [boxes, setBoxes] = useState(true);
   const [latest, setLatest] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isFs, setIsFs] = useState(false);
   // Bumped on video metadata/resize so the draw effect re-runs with correct
   // dimensions even when no new detection has arrived.
   const [redrawTick, setRedrawTick] = useState(0);
@@ -108,6 +110,21 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
     return () => clearInterval(i);
   }, []);
 
+  // Fullscreen the whole player (video + bbox canvas together).
+  useEffect(() => {
+    const onFs = () => setIsFs(document.fullscreenElement === wrapRef.current);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      wrapRef.current?.requestFullscreen().catch(() => {});
+    }
+  };
+
   // Keep the overlay aligned: redraw when the video reports its real size or
   // the element resizes (detections may arrive before the video is ready).
   useEffect(() => {
@@ -155,33 +172,44 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
   }, [latest, boxes, redrawTick]);
 
   return (
-    <div>
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-        <div className="mono uppercase tracking-[0.08em] text-text-dim text-[11px]">LIVE</div>
+    // Fill the frame at a true 16:9 (object-cover scales the near-square
+    // security-cam source up to cover the box — no pillarbox, no distortion,
+    // just edge crop). video + canvas share intrinsic dimensions and the same
+    // object-cover, so the overlay crops identically and bboxes stay aligned.
+    // In fullscreen the wrapper fills the screen instead of the 16:9 box.
+    <div
+      ref={wrapRef}
+      className={`relative bg-black w-full ${isFs ? "h-screen" : "aspect-video"}`}
+    >
+      <video
+        ref={videoRef}
+        muted
+        autoPlay
+        playsInline
+        className="absolute inset-0 w-full h-full object-cover"
+      />
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+      />
+
+      <div className="absolute top-2 left-3 mono uppercase tracking-[0.08em] text-[11px] text-white/90 drop-shadow">
+        ● LIVE
+      </div>
+      <div className="absolute top-2 right-2 flex gap-2">
         <button onClick={() => setBoxes((b) => !b)} className="btn">
           BOXES {boxes ? "ON" : "OFF"}
         </button>
+        <button onClick={toggleFullscreen} className="btn" title="Toggle fullscreen">
+          {isFs ? "EXIT FULLSCREEN" : "FULLSCREEN"}
+        </button>
       </div>
-      {/* Fixed 16:9 frame like a normal video player. The source is often a
-          tall security-cam aspect (e.g. 960x1088); object-contain letter/pillar
-          -boxes it without distortion. The canvas carries the video's intrinsic
-          resolution and the same object-contain, so its contain rect matches
-          the video's exactly and bbox overlays stay aligned. */}
-      <div className="relative bg-black w-full aspect-video">
-        <video
-          ref={videoRef}
-          muted
-          autoPlay
-          playsInline
-          className="absolute inset-0 w-full h-full object-contain"
-        />
-        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-contain pointer-events-none" />
-        {error && (
-          <div className="absolute inset-x-0 bottom-0 px-3 py-2 mono text-[11px] bg-black/70 text-danger">
-            stream error: {error}
-          </div>
-        )}
-      </div>
+
+      {error && (
+        <div className="absolute inset-x-0 bottom-0 px-3 py-2 mono text-[11px] bg-black/70 text-danger">
+          stream error: {error}
+        </div>
+      )}
     </div>
   );
 }
