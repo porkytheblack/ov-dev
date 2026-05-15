@@ -68,32 +68,44 @@ function LoginPage() {
   return (
     <main className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        <div className="mb-6 mono uppercase tracking-[0.08em] flex items-center gap-2">
-          <span>OVERWATCH</span>
-          <span style={{ width: 6, height: 6, backgroundColor: "var(--accent)" }} />
+        {/* Wordmark */}
+        <div className="mb-8 flex items-center gap-2">
+          <span className="mono uppercase tracking-[0.12em] text-accent font-semibold text-[15px]">Overwatch</span>
+          <span
+            aria-hidden="true"
+            style={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: "var(--accent)" }}
+          />
         </div>
-        <h1 className="text-[18px] mb-4">
-          {wizard ? "First-boot setup" : "Sign in"}
+
+        <h1 className="text-[22px] font-semibold mb-1">
+          {wizard ? "Create admin account" : "Sign in"}
         </h1>
-        <form onSubmit={submit} className="space-y-3">
-          <label className="block">
-            <div className="mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">
-              USERNAME
-            </div>
+        <p className="text-text-muted text-[13px] mb-6">
+          {wizard
+            ? "This is a first-boot setup. Set a username and password to secure your dashboard."
+            : "Enter your credentials to access the Overwatch dashboard."}
+        </p>
+
+        <form onSubmit={submit} className="space-y-4">
+          <div className="field">
+            <label className="label" htmlFor="username">Username</label>
             <input
-              className="input-text w-full"
+              id="username"
+              className="input-text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
               autoComplete="username"
             />
-          </label>
-          <label className="block">
-            <div className="mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-1">
-              PASSWORD
-            </div>
+          </div>
+
+          <div className="field">
+            <label className="label" htmlFor="password">
+              {wizard ? "Choose a password" : "Password"}
+            </label>
             <input
-              className="input-text w-full"
+              id="password"
+              className="input-text"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -101,21 +113,35 @@ function LoginPage() {
               autoComplete={wizard ? "new-password" : "current-password"}
               minLength={wizard ? 8 : undefined}
             />
-          </label>
-          {err && <div className="mono text-[11px] text-danger">{err}</div>}
-          <div className="flex justify-between items-center pt-2">
-            <button
-              type="button"
-              onClick={() => setWizard((w) => !w)}
-              className="mono uppercase tracking-[0.04em] text-[11px] text-text-muted hover:text-text"
-            >
-              {wizard ? "← BACK TO SIGN IN" : "FIRST BOOT? CREATE ADMIN →"}
-            </button>
-            <button type="submit" className="btn-primary" disabled={busy}>
-              {wizard ? "CREATE ADMIN" : "SIGN IN"}
-            </button>
+            {wizard && (
+              <p className="text-text-dim text-[12px]">Must be at least 8 characters.</p>
+            )}
           </div>
+
+          {err && (
+            <div
+              className="px-3 py-2 rounded-md border border-danger text-danger text-[13px]"
+              style={{ backgroundColor: "var(--danger-soft)" }}
+              role="alert"
+            >
+              {err}
+            </div>
+          )}
+
+          <button type="submit" className="btn-primary w-full" disabled={busy}>
+            {busy ? (wizard ? "Creating account…" : "Signing in…") : (wizard ? "Create account" : "Sign in")}
+          </button>
         </form>
+
+        <div className="mt-5 border-t border-border pt-4">
+          <button
+            type="button"
+            onClick={() => setWizard((w) => !w)}
+            className="btn-ghost text-[13px] w-full"
+          >
+            {wizard ? "Already have an account? Sign in" : "First time setup? Create admin account"}
+          </button>
+        </div>
       </div>
     </main>
   );

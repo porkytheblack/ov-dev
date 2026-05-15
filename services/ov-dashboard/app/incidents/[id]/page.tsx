@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Nav } from "@/components/Nav";
 import { StatusPill } from "@/components/StatusPill";
@@ -26,9 +27,13 @@ export default function IncidentDetail() {
     return (
       <>
         <Nav />
-        <main className="max-w-5xl mx-auto px-4 py-6">
-          <div className="skeleton h-6 w-64 mb-3" />
-          <div className="skeleton h-72 w-full" />
+        <main className="max-w-5xl mx-auto px-4 py-8">
+          <div className="skeleton h-5 w-32 mb-6" />
+          <div className="skeleton h-8 w-64 mb-4" />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 skeleton aspect-video" />
+            <div className="skeleton h-64" />
+          </div>
         </main>
       </>
     );
@@ -39,18 +44,31 @@ export default function IncidentDetail() {
   return (
     <>
       <Nav />
-      <main className="max-w-5xl mx-auto px-4 py-6">
-        <div className="flex items-center gap-3 mb-4">
-          <h1 className="text-[18px]">{incident.camera_name}</h1>
-          <StatusPill status={incident.status} />
-          <div className="flex-1" />
+      <main className="max-w-5xl mx-auto px-4 py-8">
+
+        {/* Breadcrumb */}
+        <div className="mb-4">
+          <Link href="/incidents" className="text-text-dim text-[13px] hover:text-text transition-colors">
+            ← All incidents
+          </Link>
+        </div>
+
+        {/* Page header */}
+        <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-[22px] font-semibold">{incident.camera_name}</h1>
+            <StatusPill status={incident.status} />
+          </div>
           {incident.status !== "acknowledged" && (
-            <button onClick={ack} className="btn-primary">ACKNOWLEDGE</button>
+            <button onClick={ack} className="btn-primary shrink-0">
+              Acknowledge incident
+            </button>
           )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 card p-0">
+          {/* Video clip */}
+          <div className="lg:col-span-2 card p-0 overflow-hidden">
             {clip ? (
               <video
                 controls
@@ -59,20 +77,58 @@ export default function IncidentDetail() {
                 className="w-full block bg-black"
               />
             ) : (
-              <div className="aspect-video flex items-center justify-center text-text-muted">
-                Clip not ready yet.
+              <div className="aspect-video flex flex-col items-center justify-center gap-2 text-text-muted">
+                <p>Clip not ready yet.</p>
+                <p className="text-[13px] text-text-dim">The recording may still be processing.</p>
               </div>
             )}
           </div>
-          <aside className="card space-y-3 mono text-[12px]">
-            <div><span className="text-text-dim">opened </span>{formatTime(incident.opened_at)}</div>
-            {incident.closed_at && <div><span className="text-text-dim">closed </span>{formatTime(incident.closed_at)}</div>}
-            <div><span className="text-text-dim">roi    </span>{incident.roi_name}</div>
-            <div><span className="text-text-dim">classes</span> {(incident.classes ?? []).join(", ")}</div>
-            {incident.track_id && <div><span className="text-text-dim">track  </span>{incident.track_id}</div>}
-            <div className="border-t border-border pt-2 text-text-muted leading-relaxed">
-              {incident.summary ?? "Summary not generated."}
+
+          {/* Incident details */}
+          <aside className="card space-y-4">
+            <h2 className="label">Incident details</h2>
+
+            <div className="field">
+              <dt className="label">Opened</dt>
+              <dd className="mono text-[12px]">{formatTime(incident.opened_at)}</dd>
             </div>
+
+            {incident.closed_at && (
+              <div className="field">
+                <dt className="label">Closed</dt>
+                <dd className="mono text-[12px]">{formatTime(incident.closed_at)}</dd>
+              </div>
+            )}
+
+            {incident.roi_name && (
+              <div className="field">
+                <dt className="label">Detection zone</dt>
+                <dd className="text-[13px]">{incident.roi_name}</dd>
+              </div>
+            )}
+
+            <div className="field">
+              <dt className="label">Detected objects</dt>
+              <dd className="mono text-[12px]">
+                {(incident.classes ?? []).length > 0
+                  ? (incident.classes ?? []).join(", ")
+                  : <span className="text-text-dim">None recorded</span>}
+              </dd>
+            </div>
+
+            {incident.track_id && (
+              <div className="field">
+                <dt className="label">Track ID</dt>
+                <dd className="mono text-[12px] text-text-muted">{incident.track_id}</dd>
+              </div>
+            )}
+
+            {incident.summary && (
+              <div className="border-t border-border pt-4">
+                <dt className="label mb-1.5">AI summary</dt>
+                <dd className="text-[13px] text-text-muted leading-relaxed">{incident.summary}</dd>
+              </div>
+            )}
           </aside>
         </div>
       </main>

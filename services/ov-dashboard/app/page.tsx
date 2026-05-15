@@ -38,65 +38,97 @@ export default async function Page() {
   return (
     <>
       <Nav />
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        <section className="mb-8">
-          <div className="flex items-baseline gap-3 mb-3">
-            <h2 className="mono uppercase tracking-[0.08em] text-text-dim text-[11px]">CAMERAS</h2>
-            <span className="mono text-text-dim text-[11px]">{cameras.cameras.length} TOTAL</span>
+      <main className="max-w-7xl mx-auto px-4 py-8">
+
+        {/* Camera grid */}
+        <section className="mb-10">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-[17px] font-semibold">Cameras</h2>
+              <p className="text-text-dim text-[13px] mt-0.5">
+                {cameras.cameras.length === 0
+                  ? "No cameras configured"
+                  : `${cameras.cameras.length} camera${cameras.cameras.length !== 1 ? "s" : ""} configured`}
+              </p>
+            </div>
+            <Link href="/cameras/new" className="btn-primary">Add camera</Link>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {cameras.cameras.length === 0 && (
-              <div className="card text-text-muted col-span-full">
-                No cameras yet. <Link href="/cameras/new" className="text-accent underline">Add one →</Link>
-              </div>
-            )}
-            {cameras.cameras.map((c: any) => (
-              <Link
-                key={c.id}
-                href={`/cameras/${c.id}`}
-                className="card hover:bg-surface-elev block"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-text">{c.name}</span>
-                  <StatusPill status={c.status} />
-                </div>
-                <div className="mono text-[11px] text-text-dim">
-                  {c.last_frame_at ? `last frame ${formatRelative(c.last_frame_at)}` : "no frames yet"}
-                </div>
-              </Link>
-            ))}
-          </div>
+
+          {cameras.cameras.length === 0 ? (
+            <div className="card flex flex-col items-center text-center py-12 gap-3">
+              <p className="text-text-muted">No cameras have been added yet.</p>
+              <p className="text-text-dim text-[13px] max-w-xs">
+                Add your first camera to start monitoring footage and detecting incidents.
+              </p>
+              <Link href="/cameras/new" className="btn-primary mt-2">Add your first camera</Link>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {cameras.cameras.map((c: any) => (
+                <Link
+                  key={c.id}
+                  href={`/cameras/${c.id}`}
+                  className="card hover:bg-surface-elev block transition-colors duration-150 group"
+                >
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <span className="text-text font-medium leading-snug">{c.name}</span>
+                    <StatusPill status={c.status} />
+                  </div>
+                  <div className="mono text-[11px] text-text-dim">
+                    {c.last_frame_at
+                      ? `Last frame ${formatRelative(c.last_frame_at)}`
+                      : "No frames received yet"}
+                  </div>
+                  <div className="mt-3 text-[12px] text-accent opacity-0 group-hover:opacity-100 transition-opacity">
+                    View camera →
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
         </section>
 
+        {/* Recent incidents */}
         <section>
-          <div className="flex items-baseline gap-3 mb-3">
-            <h2 className="mono uppercase tracking-[0.08em] text-text-dim text-[11px]">RECENT INCIDENTS</h2>
-            <Link href="/incidents" className="mono text-[11px] text-accent">VIEW ALL →</Link>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-[17px] font-semibold">Recent Incidents</h2>
+              <p className="text-text-dim text-[13px] mt-0.5">Last 10 detections across all cameras</p>
+            </div>
+            <Link href="/incidents" className="btn">View all incidents</Link>
           </div>
+
           <div className="card p-0">
             <table className="ov">
               <thead>
                 <tr>
-                  <th>TIME</th>
-                  <th>CAMERA</th>
-                  <th>CLASSES</th>
-                  <th>STATUS</th>
-                  <th>SUMMARY</th>
+                  <th>Time</th>
+                  <th>Camera</th>
+                  <th>Detected</th>
+                  <th>Status</th>
+                  <th>Summary</th>
                 </tr>
               </thead>
               <tbody>
-                {incidents.incidents.length === 0 && (
-                  <tr><td colSpan={5} className="text-text-muted">No incidents in the last 7 days.</td></tr>
-                )}
-                {incidents.incidents.map((i: any) => (
-                  <tr key={i.id}>
-                    <td className="mono">{formatRelative(i.opened_at)}</td>
-                    <td>{i.camera_name}</td>
-                    <td className="mono">{(i.classes ?? []).join(", ")}</td>
-                    <td><StatusPill status={i.status} /></td>
-                    <td className="max-w-md truncate text-text-muted">{i.summary ?? "—"}</td>
+                {incidents.incidents.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="text-text-muted text-center py-8">
+                      No incidents recorded yet. The system is monitoring for activity.
+                    </td>
                   </tr>
-                ))}
+                ) : (
+                  incidents.incidents.map((i: any) => (
+                    <tr key={i.id}>
+                      <td className="mono whitespace-nowrap">{formatRelative(i.opened_at)}</td>
+                      <td>{i.camera_name}</td>
+                      <td className="mono text-text-muted">
+                        {(i.classes ?? []).length > 0 ? (i.classes ?? []).join(", ") : "—"}
+                      </td>
+                      <td><StatusPill status={i.status} /></td>
+                      <td className="max-w-xs truncate text-text-muted">{i.summary ?? "—"}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

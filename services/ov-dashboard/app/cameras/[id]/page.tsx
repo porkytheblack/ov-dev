@@ -25,52 +25,102 @@ export default function CameraPage() {
   return (
     <>
       <Nav />
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        <div className="flex items-center gap-3 mb-4">
-          <h1 className="text-[18px]">{camera?.name ?? "Camera"}</h1>
-          {camera && <StatusPill status={camera.status} />}
-          <div className="flex-1" />
-          <Link href={`/cameras/${id}/setup`} className="btn">CONFIGURE</Link>
+      <main className="max-w-7xl mx-auto px-4 py-8">
+
+        {/* Page header */}
+        <div className="flex items-start justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3 flex-wrap">
+            {camera ? (
+              <>
+                <h1 className="text-[22px] font-semibold">{camera.name}</h1>
+                <StatusPill status={camera.status} />
+              </>
+            ) : (
+              <div className="skeleton h-7 w-48" />
+            )}
+          </div>
+          <Link href={`/cameras/${id}/setup`} className="btn shrink-0">
+            Configure camera
+          </Link>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        {/* Live view + details */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">
+          {/* Live stream */}
           <div className="lg:col-span-2 card p-0 overflow-hidden">
             <LiveViewer cameraId={id} />
           </div>
+
+          {/* Camera details */}
           <div className="card">
-            <div className="mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-2">DETAILS</div>
-            <dl className="mono text-[12px] space-y-1">
-              <div><span className="text-text-dim">id  </span>{id}</div>
-              <div><span className="text-text-dim">fps </span>{camera?.sample_fps ?? "—"}</div>
-              <div><span className="text-text-dim">last</span> {camera?.last_frame_at ? formatRelative(camera.last_frame_at) : "—"}</div>
-              <div><span className="text-text-dim">vlm </span>{camera?.vlm_enabled ? "on" : "off"}</div>
+            <h2 className="label mb-4">Camera details</h2>
+            <dl className="space-y-3">
+              <div className="field">
+                <dt className="label">Camera ID</dt>
+                <dd className="mono text-[12px] text-text-muted break-all">{id}</dd>
+              </div>
+              <div className="field">
+                <dt className="label">Sample rate</dt>
+                <dd className="mono text-[13px]">
+                  {camera?.sample_fps != null ? `${camera.sample_fps} fps` : "—"}
+                </dd>
+              </div>
+              <div className="field">
+                <dt className="label">Last frame</dt>
+                <dd className="mono text-[13px]">
+                  {camera?.last_frame_at ? formatRelative(camera.last_frame_at) : "No frames yet"}
+                </dd>
+              </div>
+              <div className="field">
+                <dt className="label">AI analysis</dt>
+                <dd className="text-[13px]">
+                  {camera?.vlm_enabled
+                    ? <span className="text-success">Enabled</span>
+                    : <span className="text-text-muted">Disabled</span>}
+                </dd>
+              </div>
             </dl>
           </div>
         </div>
 
+        {/* Incidents for this camera */}
         <section>
-          <div className="mono uppercase tracking-[0.08em] text-text-dim text-[11px] mb-2">RECENT INCIDENTS</div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-[16px] font-semibold">Recent incidents on this camera</h2>
+          </div>
           <div className="card p-0">
             <table className="ov">
               <thead>
-                <tr><th>TIME</th><th>CLASSES</th><th>STATUS</th><th>SUMMARY</th></tr>
+                <tr>
+                  <th>Time</th>
+                  <th>Detected</th>
+                  <th>Status</th>
+                  <th>Summary</th>
+                </tr>
               </thead>
               <tbody>
-                {incidents.length === 0 && (
-                  <tr><td colSpan={4} className="text-text-muted">None yet.</td></tr>
-                )}
-                {incidents.map((i: any) => (
-                  <tr key={i.id}>
-                    <td className="mono">
-                      <Link href={`/incidents/${i.id}`} className="hover:text-accent">
-                        {formatRelative(i.opened_at)}
-                      </Link>
+                {incidents.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="text-text-muted text-center py-8">
+                      No incidents recorded for this camera yet.
                     </td>
-                    <td className="mono">{(i.classes ?? []).join(", ")}</td>
-                    <td><StatusPill status={i.status} /></td>
-                    <td className="text-text-muted max-w-md truncate">{i.summary ?? "—"}</td>
                   </tr>
-                ))}
+                ) : (
+                  incidents.map((i: any) => (
+                    <tr key={i.id}>
+                      <td className="mono whitespace-nowrap">
+                        <Link href={`/incidents/${i.id}`} className="hover:text-accent transition-colors">
+                          {formatRelative(i.opened_at)}
+                        </Link>
+                      </td>
+                      <td className="mono text-text-muted">
+                        {(i.classes ?? []).length > 0 ? (i.classes ?? []).join(", ") : "—"}
+                      </td>
+                      <td><StatusPill status={i.status} /></td>
+                      <td className="text-text-muted max-w-xs truncate">{i.summary ?? "—"}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
