@@ -248,10 +248,13 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
         className="absolute inset-0 w-full h-full object-cover pointer-events-none"
       />
 
-      <div className="absolute top-2 left-3 mono uppercase tracking-[0.08em] text-[11px] text-white/90 drop-shadow">
-        ● LIVE
+      <div className="absolute top-2 left-3 flex items-center gap-2 bg-black/65 px-2 py-1 rounded">
+        <span className="mono uppercase tracking-[0.08em] text-[11px] text-white flex items-center gap-1.5">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent" />
+          LIVE
+        </span>
         {stat && (
-          <span className="ml-2 normal-case tracking-normal text-white/70">
+          <span className="mono text-[11px] text-white/80 border-l border-white/25 pl-2">
             {stat}
           </span>
         )}
