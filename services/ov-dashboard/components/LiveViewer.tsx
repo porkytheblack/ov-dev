@@ -6,27 +6,47 @@ import Hls from "hls.js";
 /**
  * Live view: LL-HLS via the stream-gateway (mediamtx transcodes HEVC→H.264 on
  * demand). hls.js drives Chrome/Firefox via MSE; Safari uses the native HLS
- * pipeline. Bbox overlays still come from the WebSocket /events stream and
- * paint a transparent canvas over the <video>.
+ * pipeline. Bbox overlays come from the WebSocket /events stream.
+ *
+ * Time sync: the detection pipeline (~1-2s) is much faster than LL-HLS
+ * glass-to-glass (several seconds), so naively drawing the newest detection
+ * paints boxes over where the subject *will be* in the laggy video. Instead we
+ * buffer detections by their capture timestamp and, every animation frame,
+ * draw the detection whose timestamp matches the wall-clock time of the video
+ * frame currently on screen — derived from the HLS EXT-X-PROGRAM-DATE-TIME
+ * (hls.js `playingDate` / native `getStartDate()`). Both the ingestor (which
+ * stamps `ts`) and mediamtx (which stamps PDT) run on the same host clock, so
+ * the overlay tracks the displayed frame regardless of either path's latency.
  */
-// How long a detection stays drawn after the last frame that contained it.
-// CPU inference is sparse and bursty (a person yields a box on some frames,
-// nothing on others); without a hold the overlay strobes and looks empty.
-const DETECTION_HOLD_MS = 2000;
+
+// Detection ts vs HLS PDT can differ by a small fixed pipeline skew. Nudge
+// here if boxes lead/trail the subject (+ve = draw older detections).
+const SYNC_OFFSET_MS = 0;
+// A buffered detection is "this frame's" only if within this of the target.
+const MATCH_TOLERANCE_MS = 1500;
+// Only used when the stream exposes no PDT (approx. HLS glass-to-glass).
+const FALLBACK_VIDEO_DELAY_MS = 4000;
+// How much detection history to retain for matching.
+const BUFFER_MS = 20000;
+
+type Sample = { t: number; dets: any[] };
 
 export function LiveViewer({ cameraId }: { cameraId: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
+  // Detections buffered by capture time (includes empty frames so "nothing
+  // here at time T" is represented too).
+  const bufRef = useRef<Sample[]>([]);
+  const boxesRef = useRef(true);
   const [boxes, setBoxes] = useState(true);
-  const [latest, setLatest] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isFs, setIsFs] = useState(false);
-  // Bumped on video metadata/resize so the draw effect re-runs with correct
-  // dimensions even when no new detection has arrived.
-  const [redrawTick, setRedrawTick] = useState(0);
-  // Wall-clock of the last non-empty detection for this camera.
-  const lastSeenRef = useRef(0);
+
+  useEffect(() => {
+    boxesRef.current = boxes;
+  }, [boxes]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -44,10 +64,10 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
         lowLatencyMode: true,
         liveDurationInfinity: true,
         backBufferLength: 4,
-        // mediamtx publishes LL-HLS parts ~100ms; keep playback close to live.
         liveSyncDurationCount: 1,
         liveMaxLatencyDurationCount: 5,
       });
+      hlsRef.current = hls;
       hls.loadSource(src);
       hls.attachMedia(video);
       hls.on(Hls.Events.ERROR, (_e, data) => {
@@ -62,6 +82,7 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
     }
     return () => {
       hls?.destroy();
+      hlsRef.current = null;
       video.removeAttribute("src");
       video.load();
     };
@@ -81,12 +102,16 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
         const msg = JSON.parse(e.data);
         if (msg.type === "frame.detections" && msg.data?.camera_id === cameraId) {
           const dets = Array.isArray(msg.data.detections) ? msg.data.detections : [];
-          if (dets.length > 0) {
-            lastSeenRef.current = Date.now();
-            setLatest(dets);
+          const parsed = Date.parse(msg.data.ts);
+          const t = Number.isFinite(parsed) ? parsed : Date.now();
+          const buf = bufRef.current;
+          buf.push({ t, dets });
+          // Keep sorted (events almost always arrive in order; guard anyway).
+          if (buf.length > 1 && buf[buf.length - 1]!.t < buf[buf.length - 2]!.t) {
+            buf.sort((a, b) => a.t - b.t);
           }
-          // Empty frame: keep the last boxes; the hold timer below clears
-          // them once detections have actually stopped for DETECTION_HOLD_MS.
+          const cutoff = Date.now() - BUFFER_MS;
+          while (buf.length && buf[0]!.t < cutoff) buf.shift();
         }
       } catch {
         /* ignore */
@@ -97,20 +122,6 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
     };
   }, [cameraId]);
 
-  // Expire stale boxes once nothing has been detected for the hold window.
-  useEffect(() => {
-    const i = setInterval(() => {
-      if (
-        lastSeenRef.current > 0 &&
-        Date.now() - lastSeenRef.current > DETECTION_HOLD_MS
-      ) {
-        setLatest((prev) => (prev.length ? [] : prev));
-      }
-    }, 250);
-    return () => clearInterval(i);
-  }, []);
-
-  // Fullscreen the whole player (video + bbox canvas together).
   useEffect(() => {
     const onFs = () => setIsFs(document.fullscreenElement === wrapRef.current);
     document.addEventListener("fullscreenchange", onFs);
@@ -125,51 +136,76 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
     }
   };
 
-  // Keep the overlay aligned: redraw when the video reports its real size or
-  // the element resizes (detections may arrive before the video is ready).
+  // Render loop: every animation frame, work out the wall-clock time of the
+  // video frame currently displayed and draw the detection that matches it.
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    const bump = () => setRedrawTick((t) => t + 1);
-    video.addEventListener("loadedmetadata", bump);
-    video.addEventListener("resize", bump);
-    const ro =
-      typeof ResizeObserver !== "undefined" ? new ResizeObserver(bump) : null;
-    ro?.observe(video);
-    return () => {
-      video.removeEventListener("loadedmetadata", bump);
-      video.removeEventListener("resize", bump);
-      ro?.disconnect();
-    };
-  }, [cameraId]);
+    let raf = 0;
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const video = videoRef.current;
-    if (!canvas || !video) return;
-    const w = video.videoWidth || video.clientWidth;
-    const h = video.videoHeight || video.clientHeight;
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.clearRect(0, 0, w, h);
-    if (!boxes) return;
-    ctx.strokeStyle = "#F59E0B";
-    ctx.lineWidth = 2;
-    ctx.font = "11px JetBrains Mono";
-    for (const d of latest) {
-      const x = d.bbox.x * w;
-      const y = d.bbox.y * h;
-      const bw = d.bbox.w * w;
-      const bh = d.bbox.h * h;
-      ctx.strokeRect(x, y, bw, bh);
-      ctx.fillStyle = "rgba(245,158,11,0.85)";
-      ctx.fillRect(x, y - 14, ctx.measureText(`${d.class} ${(d.confidence * 100).toFixed(0)}%`).width + 6, 14);
-      ctx.fillStyle = "#000";
-      ctx.fillText(`${d.class} ${(d.confidence * 100).toFixed(0)}%`, x + 3, y - 3);
-    }
-  }, [latest, boxes, redrawTick]);
+    const displayedWallMs = (video: HTMLVideoElement): number => {
+      const hls = hlsRef.current;
+      if (hls && hls.playingDate) {
+        const ms = hls.playingDate.getTime();
+        if (Number.isFinite(ms)) return ms;
+      }
+      const getStart = (video as any).getStartDate?.();
+      if (getStart instanceof Date) {
+        const startMs = getStart.getTime();
+        if (Number.isFinite(startMs)) return startMs + video.currentTime * 1000;
+      }
+      return Date.now() - FALLBACK_VIDEO_DELAY_MS;
+    };
+
+    const pickNearest = (target: number): any[] | null => {
+      const buf = bufRef.current;
+      if (!buf.length) return null;
+      let best: Sample | null = null;
+      let bestDiff = Infinity;
+      for (const s of buf) {
+        const d = Math.abs(s.t - target);
+        if (d < bestDiff) {
+          bestDiff = d;
+          best = s;
+        }
+      }
+      if (!best || bestDiff > MATCH_TOLERANCE_MS) return null;
+      return best.dets;
+    };
+
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      if (!canvas || !video) return;
+      const w = video.videoWidth || video.clientWidth;
+      const h = video.videoHeight || video.clientHeight;
+      if (!w || !h) return;
+      if (canvas.width !== w) canvas.width = w;
+      if (canvas.height !== h) canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.clearRect(0, 0, w, h);
+      if (!boxesRef.current) return;
+      const dets = pickNearest(displayedWallMs(video) + SYNC_OFFSET_MS);
+      if (!dets || !dets.length) return;
+      ctx.strokeStyle = "#F59E0B";
+      ctx.lineWidth = 2;
+      ctx.font = "11px JetBrains Mono";
+      for (const d of dets) {
+        const x = d.bbox.x * w;
+        const y = d.bbox.y * h;
+        const bw = d.bbox.w * w;
+        const bh = d.bbox.h * h;
+        ctx.strokeRect(x, y, bw, bh);
+        const label = `${d.class} ${(d.confidence * 100).toFixed(0)}%`;
+        ctx.fillStyle = "rgba(245,158,11,0.85)";
+        ctx.fillRect(x, y - 14, ctx.measureText(label).width + 6, 14);
+        ctx.fillStyle = "#000";
+        ctx.fillText(label, x + 3, y - 3);
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [cameraId]);
 
   return (
     // Fill the frame at a true 16:9 (object-cover scales the near-square
