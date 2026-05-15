@@ -41,8 +41,27 @@ def _decode(fields: dict[str, str]) -> dict[str, Any]:
     return out
 
 
-async def publish_event(redis: aioredis.Redis, stream: str, payload: dict[str, Any]) -> str:
-    msg_id = await redis.xadd(stream, _encode(payload))
+async def publish_event(
+    redis: aioredis.Redis,
+    stream: str,
+    payload: dict[str, Any],
+    *,
+    maxlen: int | None = None,
+    approximate: bool = True,
+) -> str:
+    # `frames.<cid>` is the one unbounded firehose: the ingestor samples frames
+    # far faster than CPU YOLO can drain them, so with no cap the detector
+    # consumer group falls hours behind and the live bbox overlay only ever
+    # shows stale (usually empty) detections. `consume_group` reads ">", so
+    # MAXLEN-trimmed entries are simply skipped — bounding the stream bounds
+    # the worst-case detector lag and keeps the overlay near-live. Other
+    # streams (detections/incidents/status) stay uncapped (maxlen=None).
+    if maxlen is not None:
+        msg_id = await redis.xadd(
+            stream, _encode(payload), maxlen=maxlen, approximate=approximate
+        )
+    else:
+        msg_id = await redis.xadd(stream, _encode(payload))
     return msg_id
 
 

@@ -28,6 +28,21 @@ from overwatch_shared import (
 from .db import insert_segment, upsert_camera_status
 
 SEGMENT_SECONDS = 10
+
+# Hard cap on the per-camera `frames.<cid>` Redis stream. The detector drains
+# this far slower than the ingestor fills it (CPU YOLO ≈ 1–2 fps total across
+# all cameras) so a FIFO consumer group always trails by ~the buffer size.
+# An uncapped stream → the detector falls hours behind and the live bbox
+# overlay only ever shows stale/empty detections. Worst-case detector lag ≈
+# MAXLEN / sample_fps seconds, so this is deliberately SMALL: at the default
+# sample_fps that's a few seconds of lag. consume_group reads ">", so frames
+# trimmed before delivery are simply skipped — exactly what a live overlay
+# wants (process recent frames, drop the stale ones). Trade-off: detection
+# is sampled, not exhaustive, while inference is the bottleneck — acceptable
+# for the overlay; true frame-complete detection needs a GPU or fewer cameras.
+# Tunable via env without a rebuild.
+FRAMES_STREAM_MAXLEN = int(os.environ.get("FRAMES_STREAM_MAXLEN", "12"))
+
 log = get_logger("ov-ingestor")
 
 
@@ -183,6 +198,11 @@ async def _frame_loop(camera_id: str, rtsp_url: str, sample_fps: int, redis, min
                     content_type="image/jpeg",
                 )
                 ts = datetime.now(timezone.utc)
+                # Cap the frames stream. CPU YOLO drains it far slower than we
+                # fill it; an uncapped stream means the detector processes
+                # hours-old frames and the live overlay never reflects "now".
+                # Bounding it makes the detector skip stale frames (consume_group
+                # reads ">", trimmed entries are skipped) so it stays near-live.
                 await publish_event(
                     redis,
                     f"frames.{camera_id}",
@@ -195,6 +215,9 @@ async def _frame_loop(camera_id: str, rtsp_url: str, sample_fps: int, redis, min
                         "width": int(frame.shape[1]),
                         "height": int(frame.shape[0]),
                     },
+                    maxlen=FRAMES_STREAM_MAXLEN,
+                    approximate=False,  # exact: a small cap must be enforced,
+                    # not rounded up to a ~100-entry Redis macro node.
                 )
                 await upsert_camera_status(camera_id, "online", ts)
             except Exception as e:
