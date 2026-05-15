@@ -19,9 +19,14 @@ import Hls from "hls.js";
  * the overlay tracks the displayed frame regardless of either path's latency.
  */
 
-// Detection ts vs HLS PDT can differ by a small fixed pipeline skew. Nudge
-// here if boxes lead/trail the subject (+ve = draw older detections).
-const SYNC_OFFSET_MS = 0;
+// Detection ts (ingestor grab time) is stamped earlier than mediamtx's HLS
+// PDT for the same visual moment (transcode + LL-HLS packaging adds latency
+// the raw frame grab doesn't), so matching ts≈playingDate selects a detection
+// from a slightly *later* moment and the boxes lead the video. Shifting the
+// lookup target back in time selects the older, correct detection.
+// More negative => boxes drawn for an earlier moment (pull them back / make
+// them trail). Less negative / positive => boxes move ahead. Tune to taste.
+const SYNC_OFFSET_MS = -1000;
 // A buffered detection is "this frame's" only if within this of the target.
 const MATCH_TOLERANCE_MS = 1500;
 // Only used when the stream exposes no PDT (approx. HLS glass-to-glass).
