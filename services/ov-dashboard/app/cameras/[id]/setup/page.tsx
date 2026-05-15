@@ -355,20 +355,27 @@ export default function SetupPage() {
               </span>
             </div>
             <div className="field">
-              <label className="label" htmlFor="cam-fps">Sample FPS</label>
+              <label className="label" htmlFor="cam-fps">
+                Detection sample rate (FPS)
+              </label>
               <div className="w-32">
                 <input
                   id="cam-fps"
                   type="number"
                   min={1}
-                  max={60}
+                  max={15}
                   className="input"
                   value={camFps}
                   onChange={(e) => setCamFps(Number(e.target.value))}
                 />
               </div>
-              <span className="text-text-dim text-[10px]">
-                Restarts the stream; takes effect within ~15s.
+              <span className="text-text-dim text-[10px] leading-snug">
+                How many frames per second are sent to the AI detector — <b>not</b>{" "}
+                the camera&apos;s stream FPS shown by Probe. The CPU detector
+                processes only a few FPS total across all cameras, so keep this
+                low (3–8 is plenty to catch a person). Higher values just queue
+                frames that get dropped — they do not make detection more
+                responsive. Restarts the stream; takes effect within ~15s.
               </span>
             </div>
             <div className="field">
@@ -398,7 +405,12 @@ export default function SetupPage() {
                   REACHABLE ·{" "}
                   {testResult.info?.codec ?? "?"} ·{" "}
                   {testResult.info?.width ?? "?"}×{testResult.info?.height ?? "?"} ·{" "}
-                  {testResult.info?.fps ?? "?"} fps
+                  {testResult.info?.fps ?? "?"} fps native stream
+                  <span className="text-text-dim">
+                    {" "}
+                    (informational — this is the camera&apos;s stream rate, not
+                    the detection sample rate above)
+                  </span>
                 </>
               ) : (
                 <>FAILED · {testResult.error}</>

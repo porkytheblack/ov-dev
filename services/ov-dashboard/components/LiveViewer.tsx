@@ -9,12 +9,22 @@ import Hls from "hls.js";
  * pipeline. Bbox overlays still come from the WebSocket /events stream and
  * paint a transparent canvas over the <video>.
  */
+// How long a detection stays drawn after the last frame that contained it.
+// CPU inference is sparse and bursty (a person yields a box on some frames,
+// nothing on others); without a hold the overlay strobes and looks empty.
+const DETECTION_HOLD_MS = 2000;
+
 export function LiveViewer({ cameraId }: { cameraId: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [boxes, setBoxes] = useState(true);
   const [latest, setLatest] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Bumped on video metadata/resize so the draw effect re-runs with correct
+  // dimensions even when no new detection has arrived.
+  const [redrawTick, setRedrawTick] = useState(0);
+  // Wall-clock of the last non-empty detection for this camera.
+  const lastSeenRef = useRef(0);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -68,7 +78,13 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
       try {
         const msg = JSON.parse(e.data);
         if (msg.type === "frame.detections" && msg.data?.camera_id === cameraId) {
-          setLatest(msg.data.detections ?? []);
+          const dets = Array.isArray(msg.data.detections) ? msg.data.detections : [];
+          if (dets.length > 0) {
+            lastSeenRef.current = Date.now();
+            setLatest(dets);
+          }
+          // Empty frame: keep the last boxes; the hold timer below clears
+          // them once detections have actually stopped for DETECTION_HOLD_MS.
         }
       } catch {
         /* ignore */
@@ -76,6 +92,37 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
     };
     return () => {
       try { ws?.close(); } catch { /* ignore */ }
+    };
+  }, [cameraId]);
+
+  // Expire stale boxes once nothing has been detected for the hold window.
+  useEffect(() => {
+    const i = setInterval(() => {
+      if (
+        lastSeenRef.current > 0 &&
+        Date.now() - lastSeenRef.current > DETECTION_HOLD_MS
+      ) {
+        setLatest((prev) => (prev.length ? [] : prev));
+      }
+    }, 250);
+    return () => clearInterval(i);
+  }, []);
+
+  // Keep the overlay aligned: redraw when the video reports its real size or
+  // the element resizes (detections may arrive before the video is ready).
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const bump = () => setRedrawTick((t) => t + 1);
+    video.addEventListener("loadedmetadata", bump);
+    video.addEventListener("resize", bump);
+    const ro =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(bump) : null;
+    ro?.observe(video);
+    return () => {
+      video.removeEventListener("loadedmetadata", bump);
+      video.removeEventListener("resize", bump);
+      ro?.disconnect();
     };
   }, [cameraId]);
 
@@ -105,7 +152,7 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
       ctx.fillStyle = "#000";
       ctx.fillText(`${d.class} ${(d.confidence * 100).toFixed(0)}%`, x + 3, y - 3);
     }
-  }, [latest, boxes]);
+  }, [latest, boxes, redrawTick]);
 
   return (
     <div>
