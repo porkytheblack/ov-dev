@@ -115,15 +115,20 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
           BOXES {boxes ? "ON" : "OFF"}
         </button>
       </div>
-      <div className="relative bg-black">
+      {/* Fixed 16:9 frame like a normal video player. The source is often a
+          tall security-cam aspect (e.g. 960x1088); object-contain letter/pillar
+          -boxes it without distortion. The canvas carries the video's intrinsic
+          resolution and the same object-contain, so its contain rect matches
+          the video's exactly and bbox overlays stay aligned. */}
+      <div className="relative bg-black w-full aspect-video">
         <video
           ref={videoRef}
           muted
           autoPlay
           playsInline
-          className="block w-full h-auto"
+          className="absolute inset-0 w-full h-full object-contain"
         />
-        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
+        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-contain pointer-events-none" />
         {error && (
           <div className="absolute inset-x-0 bottom-0 px-3 py-2 mono text-[11px] bg-black/70 text-danger">
             stream error: {error}
