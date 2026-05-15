@@ -4,110 +4,220 @@ import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
 
 /**
- * Live view: LL-HLS via the stream-gateway (mediamtx transcodes HEVC→H.264 on
- * demand). hls.js drives Chrome/Firefox via MSE; Safari uses the native HLS
- * pipeline. Bbox overlays come from the WebSocket /events stream.
+ * Live view. Primary transport is WebRTC/WHEP (sub-second glass-to-glass) so
+ * the picture is genuinely live and the bbox overlay lines up with what's on
+ * screen. If WHEP can't establish (e.g. the ICE port isn't reachable) it
+ * falls back to LL-HLS so there's still a picture.
  *
- * Time sync: the detection pipeline (~1-2s) is much faster than LL-HLS
- * glass-to-glass (several seconds), so naively drawing the newest detection
- * paints boxes over where the subject *will be* in the laggy video. Instead we
- * buffer detections by their capture timestamp and, every animation frame,
- * draw the detection whose timestamp matches the wall-clock time of the video
- * frame currently on screen — derived from the HLS EXT-X-PROGRAM-DATE-TIME
- * (hls.js `playingDate` / native `getStartDate()`). Both the ingestor (which
- * stamps `ts`) and mediamtx (which stamps PDT) run on the same host clock, so
- * the overlay tracks the displayed frame regardless of either path's latency.
+ * Overlay: detections (WS /events, ~1s pipeline) are buffered by capture
+ * timestamp.
+ *  - WebRTC: video is ~live, so we draw the freshest detection; it trails the
+ *    subject by roughly the detection compute time (~1s) — the inherent floor
+ *    without delaying the video.
+ *  - HLS: video is several seconds behind, so we draw the detection whose
+ *    timestamp matches the displayed frame (derived from the playing
+ *    fragment's EXT-X-PROGRAM-DATE-TIME), self-correcting to the real lag.
  */
 
-// Detection ts (ingestor grab time) is stamped earlier than mediamtx's HLS
-// PDT for the same visual moment (transcode + LL-HLS packaging adds latency
-// the raw frame grab doesn't), so matching ts≈playingDate selects a detection
-// from a slightly *later* moment and the boxes lead the video. Shifting the
-// lookup target back in time selects the older, correct detection.
-// More negative => boxes drawn for an earlier moment (pull them back / make
-// them trail). Less negative / positive => boxes move ahead. Tune to taste.
+// HLS-only: detection ts vs mediamtx PDT skew (see git history). WebRTC needs
+// no such constant — both paths are near-real-time.
 const SYNC_OFFSET_MS = 0;
-// A buffered detection is "this frame's" only if within this of the target.
+const WEBRTC_SYNC_OFFSET_MS = 0;
 const MATCH_TOLERANCE_MS = 2500;
-// Only used when the stream exposes no PDT (approx. HLS glass-to-glass).
 const FALLBACK_VIDEO_DELAY_MS = 6000;
-// How much detection history to retain for matching (must exceed the worst
-// case video latency + |SYNC_OFFSET_MS| + tolerance).
 const BUFFER_MS = 30000;
+const WHEP_CONNECT_TIMEOUT_MS = 9000;
 
 type Sample = { t: number; dets: any[] };
+type Mode = "connecting" | "webrtc" | "hls";
 
 export function LiveViewer({ cameraId }: { cameraId: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
-  // Program-date-time anchor of the fragment currently playing: maps the
-  // media timeline (video.currentTime) to wall-clock. Far more reliable in
-  // LL-HLS than hls.playingDate, which mediamtx's sparse PDT tags leave null.
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const whepResRef = useRef<string | null>(null);
   const fragRef = useRef<{ pdt: number; start: number } | null>(null);
-  // Detections buffered by capture time (includes empty frames so "nothing
-  // here at time T" is represented too).
   const bufRef = useRef<Sample[]>([]);
   const boxesRef = useRef(true);
+  const modeRef = useRef<Mode>("connecting");
   const [boxes, setBoxes] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isFs, setIsFs] = useState(false);
-  // Subtle latency readout (also a tuning aid for SYNC_OFFSET_MS).
+  const [mode, setMode] = useState<Mode>("connecting");
   const [stat, setStat] = useState<string>("");
   const statAtRef = useRef(0);
 
   useEffect(() => {
     boxesRef.current = boxes;
   }, [boxes]);
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    const src = `/stream/${cameraId}/hls/index.m3u8`;
+    let cancelled = false;
     let hls: Hls | null = null;
     setError(null);
+    setMode("connecting");
 
-    const useNative = video.canPlayType("application/vnd.apple.mpegurl");
-    if (useNative) {
-      video.src = src;
-      video.play().catch(() => {/* autoplay blocked; user gesture needed */});
-    } else if (Hls.isSupported()) {
-      hls = new Hls({
-        lowLatencyMode: true,
-        liveDurationInfinity: true,
-        backBufferLength: 4,
-        liveSyncDurationCount: 1,
-        liveMaxLatencyDurationCount: 5,
+    const teardownPc = () => {
+      const res = whepResRef.current;
+      if (res) {
+        fetch(res, { method: "DELETE" }).catch(() => {});
+        whepResRef.current = null;
+      }
+      try {
+        pcRef.current?.close();
+      } catch {
+        /* ignore */
+      }
+      pcRef.current = null;
+      if (video.srcObject) video.srcObject = null;
+    };
+
+    const waitIce = (pc: RTCPeerConnection, ms: number) =>
+      new Promise<void>((resolve) => {
+        if (pc.iceGatheringState === "complete") return resolve();
+        const done = () => {
+          clearTimeout(timer);
+          pc.removeEventListener("icegatheringstatechange", check);
+          resolve();
+        };
+        const check = () => {
+          if (pc.iceGatheringState === "complete") done();
+        };
+        const timer = setTimeout(done, ms);
+        pc.addEventListener("icegatheringstatechange", check);
       });
-      hlsRef.current = hls;
-      hls.loadSource(src);
-      hls.attachMedia(video);
-      const onFrag = (_e: unknown, data: any) => {
-        const f = data?.frag;
-        const pdt = f?.programDateTime;
-        if (f && typeof pdt === "number" && Number.isFinite(pdt)) {
-          fragRef.current = { pdt, start: f.start ?? 0 };
+
+    const waitConnected = (pc: RTCPeerConnection, ms: number) =>
+      new Promise<boolean>((resolve) => {
+        const finish = (v: boolean) => {
+          clearTimeout(timer);
+          pc.removeEventListener("iceconnectionstatechange", on);
+          pc.removeEventListener("connectionstatechange", on);
+          resolve(v);
+        };
+        const on = () => {
+          const s = pc.iceConnectionState;
+          const c = pc.connectionState;
+          if (s === "connected" || s === "completed" || c === "connected")
+            finish(true);
+          else if (
+            s === "failed" ||
+            c === "failed" ||
+            s === "closed" ||
+            c === "closed"
+          )
+            finish(false);
+        };
+        const timer = setTimeout(() => finish(false), ms);
+        pc.addEventListener("iceconnectionstatechange", on);
+        pc.addEventListener("connectionstatechange", on);
+        on();
+      });
+
+    const connectWhep = async (): Promise<boolean> => {
+      const pc = new RTCPeerConnection();
+      pcRef.current = pc;
+      pc.addTransceiver("video", { direction: "recvonly" });
+      pc.ontrack = (e) => {
+        if (videoRef.current && e.streams[0]) {
+          videoRef.current.srcObject = e.streams[0];
+          videoRef.current.play().catch(() => {});
         }
       };
-      hls.on(Hls.Events.FRAG_CHANGED, onFrag);
-      hls.on(Hls.Events.FRAG_BUFFERED, onFrag);
-      hls.on(Hls.Events.ERROR, (_e, data) => {
-        if (data.fatal) {
-          setError(`${data.type}: ${data.details}`);
-          hls?.destroy();
-        }
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await waitIce(pc, 2500);
+      if (cancelled) return false;
+      const res = await fetch(`/stream/${cameraId}/whep`, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: pc.localDescription?.sdp ?? offer.sdp ?? "",
+        credentials: "include",
       });
-      video.play().catch(() => {/* autoplay blocked */});
-    } else {
-      setError("HLS not supported in this browser");
-    }
+      if (!res.ok) return false;
+      const loc = res.headers.get("location");
+      if (loc) whepResRef.current = loc;
+      const answer = await res.text();
+      if (!answer || cancelled) return false;
+      await pc.setRemoteDescription({ type: "answer", sdp: answer });
+      return waitConnected(pc, WHEP_CONNECT_TIMEOUT_MS);
+    };
+
+    const startHls = () => {
+      const src = `/stream/${cameraId}/hls/index.m3u8`;
+      const useNative = video.canPlayType("application/vnd.apple.mpegurl");
+      if (useNative) {
+        video.src = src;
+        video.play().catch(() => {});
+      } else if (Hls.isSupported()) {
+        hls = new Hls({
+          lowLatencyMode: true,
+          liveDurationInfinity: true,
+          backBufferLength: 4,
+          liveSyncDurationCount: 1,
+          liveMaxLatencyDurationCount: 5,
+        });
+        hlsRef.current = hls;
+        hls.loadSource(src);
+        hls.attachMedia(video);
+        const onFrag = (_e: unknown, data: any) => {
+          const f = data?.frag;
+          const pdt = f?.programDateTime;
+          if (f && typeof pdt === "number" && Number.isFinite(pdt)) {
+            fragRef.current = { pdt, start: f.start ?? 0 };
+          }
+        };
+        hls.on(Hls.Events.FRAG_CHANGED, onFrag);
+        hls.on(Hls.Events.FRAG_BUFFERED, onFrag);
+        hls.on(Hls.Events.ERROR, (_e, data) => {
+          if (data.fatal) {
+            setError(`${data.type}: ${data.details}`);
+            hls?.destroy();
+          }
+        });
+        video.play().catch(() => {});
+      } else {
+        setError("Live video not supported in this browser");
+        return;
+      }
+      if (!cancelled) setMode("hls");
+    };
+
+    (async () => {
+      let ok = false;
+      try {
+        ok = await connectWhep();
+      } catch {
+        ok = false;
+      }
+      if (cancelled) return;
+      if (ok) {
+        setMode("webrtc");
+      } else {
+        teardownPc();
+        startHls();
+      }
+    })();
+
     return () => {
+      cancelled = true;
+      teardownPc();
       hls?.destroy();
       hlsRef.current = null;
       fragRef.current = null;
-      video.removeAttribute("src");
-      video.load();
+      try {
+        video.removeAttribute("src");
+        video.load();
+      } catch {
+        /* ignore */
+      }
     };
   }, [cameraId]);
 
@@ -129,7 +239,6 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
           const t = Number.isFinite(parsed) ? parsed : Date.now();
           const buf = bufRef.current;
           buf.push({ t, dets });
-          // Keep sorted (events almost always arrive in order; guard anyway).
           if (buf.length > 1 && buf[buf.length - 1]!.t < buf[buf.length - 2]!.t) {
             buf.sort((a, b) => a.t - b.t);
           }
@@ -159,14 +268,10 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
     }
   };
 
-  // Render loop: every animation frame, work out the wall-clock time of the
-  // video frame currently displayed and draw the detection that matches it.
   useEffect(() => {
     let raf = 0;
 
-    const displayedWallMs = (
-      video: HTMLVideoElement,
-    ): { ms: number; src: string } => {
+    const hlsWallMs = (video: HTMLVideoElement): { ms: number; src: string } => {
       const fr = fragRef.current;
       if (fr && Number.isFinite(video.currentTime)) {
         return { ms: fr.pdt + (video.currentTime - fr.start) * 1000, src: "frag" };
@@ -176,11 +281,9 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
         const ms = hls.playingDate.getTime();
         if (Number.isFinite(ms)) return { ms, src: "pdt" };
       }
-      const getStart = (video as any).getStartDate?.();
-      if (getStart instanceof Date) {
-        const startMs = getStart.getTime();
-        if (Number.isFinite(startMs))
-          return { ms: startMs + video.currentTime * 1000, src: "sd" };
+      const gs = (video as any).getStartDate?.();
+      if (gs instanceof Date && Number.isFinite(gs.getTime())) {
+        return { ms: gs.getTime() + video.currentTime * 1000, src: "sd" };
       }
       return { ms: Date.now() - FALLBACK_VIDEO_DELAY_MS, src: "fb" };
     };
@@ -214,15 +317,30 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.clearRect(0, 0, w, h);
-      const disp = displayedWallMs(video);
+
       const now = Date.now();
+      let target: number;
+      let srcTag: string;
+      if (modeRef.current === "webrtc") {
+        target = now + WEBRTC_SYNC_OFFSET_MS;
+        srcTag = "webrtc";
+      } else {
+        const d = hlsWallMs(video);
+        target = d.ms + SYNC_OFFSET_MS;
+        srcTag = d.src;
+      }
       if (now - statAtRef.current > 1000) {
         statAtRef.current = now;
-        const vlat = ((now - disp.ms) / 1000).toFixed(1);
-        setStat(`v-lat ${vlat}s · ${disp.src} · off ${SYNC_OFFSET_MS / 1000}s`);
+        const buf = bufRef.current;
+        if (modeRef.current === "webrtc") {
+          const age = buf.length ? (now - buf[buf.length - 1]!.t) / 1000 : 0;
+          setStat(`webrtc · det ~${age.toFixed(1)}s`);
+        } else {
+          setStat(`hls v-lat ${((now - target) / 1000).toFixed(1)}s · ${srcTag}`);
+        }
       }
       if (!boxesRef.current) return;
-      const dets = pickNearest(disp.ms + SYNC_OFFSET_MS);
+      const dets = pickNearest(target);
       if (!dets || !dets.length) return;
       ctx.strokeStyle = "#F59E0B";
       ctx.lineWidth = 2;
@@ -245,11 +363,6 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
   }, [cameraId]);
 
   return (
-    // Fill the frame at a true 16:9 (object-cover scales the near-square
-    // security-cam source up to cover the box — no pillarbox, no distortion,
-    // just edge crop). video + canvas share intrinsic dimensions and the same
-    // object-cover, so the overlay crops identically and bboxes stay aligned.
-    // In fullscreen the wrapper fills the screen instead of the 16:9 box.
     <div
       ref={wrapRef}
       className={`relative bg-black w-full ${isFs ? "h-screen" : "aspect-video"}`}
@@ -268,8 +381,12 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
 
       <div className="absolute top-2 left-3 flex items-center gap-2 bg-black/65 px-2 py-1 rounded">
         <span className="mono uppercase tracking-[0.08em] text-[11px] text-white flex items-center gap-1.5">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent" />
-          LIVE
+          <span
+            className={`inline-block w-1.5 h-1.5 rounded-full ${
+              mode === "connecting" ? "bg-text-dim" : "bg-accent"
+            }`}
+          />
+          {mode === "connecting" ? "CONNECTING" : "LIVE"}
         </span>
         {stat && (
           <span className="mono text-[11px] text-white/80 border-l border-white/25 pl-2">
