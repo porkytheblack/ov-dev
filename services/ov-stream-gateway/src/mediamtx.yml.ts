@@ -59,6 +59,17 @@ export async function renderMediamtxYml(sql: ReturnType<typeof postgres>): Promi
     })
     .join("\n");
 
+  // WebRTC media is peer-to-peer (ICE/SRTP) and cannot ride the Caddy HTTP
+  // tunnel like the WHEP signaling does. Pin all ICE to a single UDP+TCP
+  // port (8189, published to the host in compose) and advertise ONLY a
+  // host-reachable address — Docker-internal interface IPs (172.x) are
+  // useless to the browser and just slow ICE, so disable interface
+  // gathering. WEBRTC_ADVERTISE_HOST is comma-separated (default localhost).
+  const advertiseHosts = (process.env.WEBRTC_ADVERTISE_HOST ?? "127.0.0.1")
+    .split(",")
+    .map((h) => h.trim())
+    .filter(Boolean);
+
   return [
     "logLevel: info",
     "rtsp: yes",
@@ -66,6 +77,10 @@ export async function renderMediamtxYml(sql: ReturnType<typeof postgres>): Promi
     "webrtc: yes",
     "webrtcAddress: :8889",
     "webrtcAllowOrigins: ['*']",
+    "webrtcLocalUDPAddress: :8189",
+    "webrtcLocalTCPAddress: :8189",
+    "webrtcIPsFromInterfaces: no",
+    `webrtcAdditionalHosts: [${advertiseHosts.join(", ")}]`,
     "hls: yes",
     "hlsAddress: :8888",
     "hlsAllowOrigins: ['*']",

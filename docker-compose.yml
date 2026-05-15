@@ -199,6 +199,16 @@ services:
     restart: unless-stopped
     networks: [overwatch]
     env_file: [.env]
+    # WHEP signaling tunnels through Caddy:9090, but WebRTC media is direct
+    # browser↔mediamtx ICE — publish the single pinned ICE port to the host.
+    # WEBRTC_ADVERTISE_HOST is the address the SDP answer hands the browser;
+    # 127.0.0.1 for local access, or set to the host's LAN/Tailscale IP(s)
+    # (comma-separated) when the dashboard is opened from another machine.
+    environment:
+      WEBRTC_ADVERTISE_HOST: ${WEBRTC_ADVERTISE_HOST:-127.0.0.1}
+    ports:
+      - "8189:8189/udp"
+      - "8189:8189/tcp"
     depends_on:
       postgres: { condition: service_healthy }
 
