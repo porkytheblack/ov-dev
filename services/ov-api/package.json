@@ -1,0 +1,33 @@
+{
+  "name": "@overwatch/ov-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.11.0",
+    "@hono/zod-validator": "^0.2.1",
+    "@node-rs/argon2": "^1.8.3",
+    "@overwatch/schemas": "workspace:*",
+    "@overwatch/shared-ts": "workspace:*",
+    "hono": "^4.4.3",
+    "ioredis": "^5.4.1",
+    "lucia": "^3.2.0",
+    "postgres": "^3.4.4",
+    "uuid": "^9.0.1",
+    "ws": "^8.17.0",
+    "zod": "^3.23.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "@types/uuid": "^9.0.8",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.7.2",
+    "typescript": "^5.4.5"
+  }
+}

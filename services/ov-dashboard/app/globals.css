@@ -1,0 +1,191 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Surfaces — refined neutral slate, soft (not pure black) for 24/7 viewing */
+    --bg: #0c0e12;
+    --surface: #14171d;
+    --surface-elev: #1c2027;
+    --border: #272b33;
+    --border-strong: #3a3f4a;
+
+    /* Text — tuned for WCAG-ish contrast on the surfaces above */
+    --text: #eef0f3;
+    --text-muted: #9aa1ad;
+    --text-dim: #6b7280;
+
+    /* Accent — warm amber ("live"/active in a security UI), softened + legible */
+    --accent: #f5ad4a;
+    --accent-strong: #ffc36b;
+    --accent-dim: #5a3a12;
+
+    /* Semantic state */
+    --success: #34d399;
+    --danger: #f87171;
+
+    /* Foreground used on solid accent / state fills (kept dark for contrast) */
+    --on-accent: #1a1205;
+    --on-danger: #1a0606;
+
+    /* Translucent tints + focus ring (CSS-var colors can't take Tailwind
+       slash-opacity, so these are pre-mixed values) */
+    --accent-soft: rgba(245, 173, 74, 0.12);
+    --success-soft: rgba(52, 211, 153, 0.12);
+    --danger-soft: rgba(248, 113, 113, 0.12);
+    --ring: rgba(245, 173, 74, 0.35);
+  }
+
+  html,
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans), Inter, system-ui, sans-serif;
+    font-weight: 400;
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  *,
+  *::before,
+  *::after {
+    border-color: var(--border);
+  }
+
+  ::selection {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+
+  .mono {
+    font-family: var(--font-mono), "JetBrains Mono", ui-monospace, monospace;
+    font-feature-settings: "tnum" 1;
+  }
+}
+
+@layer components {
+  /* ---- Buttons ---------------------------------------------------------- */
+  /* Shared base: flex-centered so text can NEVER sit outside the box and
+     long labels never overflow (single line). */
+  .btn,
+  .btn-primary,
+  .btn-ghost,
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap
+           min-h-9 px-4 py-1.5 rounded-md
+           font-medium text-[13px] leading-none max-w-full
+           border transition-colors duration-150 select-none cursor-pointer
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--ring)]
+           disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn {
+    @apply border-border-strong bg-surface-elev text-text
+           hover:bg-border-strong active:bg-border;
+  }
+  .btn-primary {
+    @apply border-accent bg-accent text-[color:var(--on-accent)] font-semibold
+           hover:bg-accent-strong hover:border-accent-strong
+           active:brightness-95;
+  }
+  .btn-ghost {
+    @apply border-transparent bg-transparent text-text-muted
+           hover:bg-surface-elev hover:text-text active:bg-border;
+  }
+  .btn-danger {
+    @apply border-danger bg-transparent text-danger
+           hover:bg-danger hover:text-[color:var(--on-danger)] hover:border-danger
+           active:brightness-95;
+  }
+
+  /* ---- Form controls ---------------------------------------------------- */
+  .input {
+    @apply h-9 px-3 w-full bg-surface border border-border rounded-md
+           text-text font-mono text-[13px] placeholder:text-text-dim
+           transition-colors duration-150
+           focus:outline-none focus:border-accent
+           focus:ring-2 focus:ring-[color:var(--ring)]
+           disabled:opacity-50;
+  }
+  .input-text {
+    @apply h-9 px-3 w-full bg-surface border border-border rounded-md
+           text-text text-[14px] placeholder:text-text-dim
+           transition-colors duration-150
+           focus:outline-none focus:border-accent
+           focus:ring-2 focus:ring-[color:var(--ring)]
+           disabled:opacity-50;
+  }
+
+  /* Repeated field-label pattern, now a single helper */
+  .label {
+    @apply block font-mono uppercase tracking-[0.08em] text-text-dim text-[11px];
+  }
+  /* Optional wrapper: stacks a .label above its control with consistent gap */
+  .field {
+    @apply flex flex-col gap-1.5;
+  }
+
+  /* ---- Surfaces --------------------------------------------------------- */
+  .card {
+    @apply bg-surface border border-border rounded-lg p-5 shadow-card;
+  }
+
+  /* ---- Pills / status badges ------------------------------------------- */
+  .pill {
+    @apply inline-flex items-center gap-1.5 font-mono uppercase
+           tracking-[0.06em] text-[10px] leading-none px-2.5 h-6
+           rounded-full border whitespace-nowrap;
+  }
+  .pill-open {
+    @apply bg-accent text-[color:var(--on-accent)] border-accent font-semibold;
+  }
+  .pill-closed {
+    @apply text-text-muted border-border-strong bg-surface-elev;
+  }
+  .pill-ack {
+    @apply text-success border-success bg-[color:var(--success-soft)];
+  }
+  .pill-suppressed {
+    @apply text-text-dim border-border bg-surface-elev;
+  }
+  .pill-live {
+    @apply text-accent border-accent bg-[color:var(--accent-soft)];
+  }
+  .pill-offline {
+    @apply text-danger border-danger bg-[color:var(--danger-soft)];
+  }
+  .pill-connecting {
+    @apply text-text-muted border-border-strong bg-surface-elev;
+  }
+
+  /* ---- Tables ----------------------------------------------------------- */
+  table.ov {
+    @apply w-full border-collapse;
+  }
+  table.ov thead th {
+    @apply text-text-dim uppercase font-mono text-[11px] tracking-[0.08em] text-left
+           py-2.5 px-3 border-b border-border;
+  }
+  table.ov tbody td {
+    @apply py-2.5 px-3 border-b border-border align-top text-[14px];
+  }
+  table.ov td.mono,
+  table.ov td.num {
+    @apply font-mono text-[13px];
+  }
+  table.ov tbody tr {
+    @apply transition-colors duration-100;
+  }
+  table.ov tr:hover td {
+    @apply bg-surface-elev;
+  }
+
+  /* ---- Loading ---------------------------------------------------------- */
+  .skeleton {
+    @apply bg-surface-elev animate-pulse h-4 w-full rounded;
+  }
+}
