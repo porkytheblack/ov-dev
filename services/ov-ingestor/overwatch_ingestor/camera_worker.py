@@ -5,6 +5,7 @@ an OpenCV frame loop samples frames at the configured fps. Both upload to MinIO.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import os
 import shutil
@@ -174,17 +175,32 @@ async def _frame_loop(camera_id: str, rtsp_url: str, sample_fps: int, redis, min
             await _publish_status(redis, camera_id, "offline")
             await asyncio.sleep(5)
             continue
+        # Keep only the newest frame. Without this, OpenCV's FFMPEG RTSP buffer
+        # grows whenever this loop or the host is busy and cap.read() returns
+        # progressively STALE frames — but we stamp ts=now() at publish, so the
+        # detection timestamp drifts ahead of when the subject was actually
+        # recorded (segments are written real-time by a separate ffmpeg). Result:
+        # footage built around the detection ts shows an empty scene / the
+        # subject is missed. BUFFERSIZE=1 + grab()-drain keeps frame content ≈
+        # now(), so detection ts aligns with the recording.
+        with contextlib.suppress(Exception):
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         await _publish_status(redis, camera_id, "online")
         last_sample = 0.0
         while not stop_event.is_set():
-            ok, frame = cap.read()
-            if not ok:
+            # grab() (no decode) drains to the freshest frame cheaply; we only
+            # decode (retrieve) the one we actually sample.
+            if not cap.grab():
                 log.warning("frame read failed; reconnecting", camera_id=camera_id)
                 break
             now = time.time()
             if now - last_sample < interval:
                 continue
             last_sample = now
+            ok, frame = cap.retrieve()
+            if not ok:
+                log.warning("frame retrieve failed; reconnecting", camera_id=camera_id)
+                break
             try:
                 _, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                 data = buf.tobytes()
