@@ -87,12 +87,42 @@ function PlaybackPage() {
 
         {/* Video */}
         {data.stream_url ? (
-          <video
-            controls
-            poster={data.poster_url ?? undefined}
-            src={data.stream_url}
-            className="w-full bg-black rounded-md"
-          />
+          <>
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <video
+              controls
+              autoPlay
+              playsInline
+              poster={data.poster_url ?? undefined}
+              src={`${data.stream_url}${
+                data.start_offset_seconds > 0
+                  ? `#t=${data.start_offset_seconds}`
+                  : ""
+              }`}
+              onLoadedMetadata={(e) => {
+                const v = e.currentTarget;
+                const s = Number(data.start_offset_seconds) || 0;
+                if (
+                  s > 0 &&
+                  Number.isFinite(v.duration) &&
+                  s < v.duration - 0.5 &&
+                  Math.abs(v.currentTime - s) > 1
+                ) {
+                  try {
+                    v.currentTime = s;
+                  } catch {
+                    /* ignore */
+                  }
+                }
+              }}
+              className="w-full bg-black rounded-md"
+            />
+            {data.start_offset_seconds > 0 && (
+              <p className="text-text-dim mono text-[11px] mt-2">
+                ▶ Skipped to the detection · scrub back for the full clip
+              </p>
+            )}
+          </>
         ) : (
           <div className="card text-center py-8">
             <p className="text-text-muted">Clip not ready yet.</p>

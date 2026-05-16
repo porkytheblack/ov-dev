@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Nav } from "@/components/Nav";
 import { StatusPill } from "@/components/StatusPill";
+import { clipSeekSeconds } from "@/components/ClipModal";
 import { formatTime } from "@/lib/format";
 
 export default function IncidentDetail() {
@@ -46,6 +47,9 @@ export default function IncidentDetail() {
     incident.clip_storage_key ?? clip?.storage_key ?? null;
   const posterKey: string | null =
     incident.clip_poster_key ?? clip?.poster_key ?? null;
+  const clipStartTs: string | null =
+    incident.clip_start_ts ?? clip?.start_ts ?? null;
+  const seek = clipSeekSeconds(incident.opened_at, clipStartTs);
 
   return (
     <>
@@ -78,12 +82,31 @@ export default function IncidentDetail() {
             {clipKey ? (
               <video
                 controls
-                src={`/api/clips/by-key/${encodeURIComponent(clipKey)}`}
+                autoPlay
+                playsInline
+                src={`/api/clips/by-key/${encodeURIComponent(clipKey)}${
+                  seek > 0 ? `#t=${seek}` : ""
+                }`}
                 poster={
                   posterKey
                     ? `/api/clips/by-key/${encodeURIComponent(posterKey)}`
                     : undefined
                 }
+                onLoadedMetadata={(e) => {
+                  const v = e.currentTarget;
+                  if (
+                    seek > 0 &&
+                    Number.isFinite(v.duration) &&
+                    seek < v.duration - 0.5 &&
+                    Math.abs(v.currentTime - seek) > 1
+                  ) {
+                    try {
+                      v.currentTime = seek;
+                    } catch {
+                      /* ignore */
+                    }
+                  }
+                }}
                 className="w-full block bg-black"
               />
             ) : (
