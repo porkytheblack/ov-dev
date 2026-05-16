@@ -63,6 +63,7 @@ app.get("/api/clips/by-key/:rest{.+}", async (c) => {
   return publicClips.fetch(
     new Request(`http://internal${sub}${url.search}`, {
       method: c.req.method,
+      headers: c.req.raw.headers, // forward Range/If-Range for <video> seeking
     }),
   );
 });
