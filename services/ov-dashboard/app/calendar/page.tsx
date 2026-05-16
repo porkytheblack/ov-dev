@@ -123,44 +123,56 @@ export default function CalendarPage() {
 
               const list = byDay[d] ?? [];
               const isToday = d === todayDay;
+              const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+              const cams = Array.from(
+                new Set(list.map((x: any) => x.camera_name).filter(Boolean)),
+              ) as string[];
 
               return (
-                <div
+                <Link
                   key={`day-${d}`}
-                  className="min-h-[88px] border-b border-r border-border p-2"
+                  href={`/calendar/${dateStr}`}
+                  className="group min-h-[88px] border-b border-r border-border p-2 block hover:bg-surface-elev transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--ring)]"
                   style={isToday ? { backgroundColor: "var(--accent-soft)" } : undefined}
                 >
-                  {/* Day number */}
-                  <div className={`mono text-[11px] mb-1 ${isToday ? "text-accent font-semibold" : "text-text-dim"}`}>
-                    {String(d).padStart(2, "0")}
-                    {isToday && <span className="ml-1 text-accent">Today</span>}
+                  <div className="flex items-center justify-between">
+                    <div className={`mono text-[11px] ${isToday ? "text-accent font-semibold" : "text-text-dim"}`}>
+                      {String(d).padStart(2, "0")}
+                      {isToday && <span className="ml-1 text-accent">Today</span>}
+                    </div>
+                    <span className="mono text-[10px] text-text-dim opacity-0 group-hover:opacity-100 transition-opacity">
+                      View →
+                    </span>
                   </div>
 
-                  {/* Incident count badge */}
-                  {list.length > 0 && (
-                    <div className="mono text-[16px] text-text font-semibold leading-none mb-1">
-                      {list.length}
+                  {list.length > 0 ? (
+                    <>
+                      <div className="mono text-[16px] text-text font-semibold leading-none mt-1 mb-1">
+                        {list.length}
+                        <span className="text-[10px] text-text-dim font-normal ml-1">
+                          incident{list.length !== 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      {cams.slice(0, 3).map((cn) => (
+                        <div
+                          key={cn}
+                          className="mono text-[11px] text-text-muted truncate"
+                        >
+                          {cn}
+                        </div>
+                      ))}
+                      {cams.length > 3 && (
+                        <div className="mono text-[10px] text-text-dim mt-0.5">
+                          +{cams.length - 3} more
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="mono text-[10px] text-text-dim mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      No incidents
                     </div>
                   )}
-
-                  {/* Incident links (first two) */}
-                  {list.slice(0, 2).map((it) => (
-                    <Link
-                      key={it.id}
-                      href={`/incidents/${it.id}`}
-                      className="block mono text-[11px] text-text-muted hover:text-accent truncate transition-colors"
-                    >
-                      {it.camera_name}
-                    </Link>
-                  ))}
-
-                  {/* Overflow indicator */}
-                  {list.length > 2 && (
-                    <div className="mono text-[10px] text-text-dim mt-0.5">
-                      +{list.length - 2} more
-                    </div>
-                  )}
-                </div>
+                </Link>
               );
             })}
           </div>
@@ -175,7 +187,7 @@ export default function CalendarPage() {
             />
             <span>Today</span>
           </div>
-          <span className="mono">Numbers = incident count for that day. Click an incident name to view details.</span>
+          <span className="mono">Click any day to open its incidents, grouped by camera.</span>
         </div>
       </main>
     </>

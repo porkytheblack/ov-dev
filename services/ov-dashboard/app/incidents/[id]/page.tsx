@@ -40,6 +40,12 @@ export default function IncidentDetail() {
   }
 
   const clip = (incident.clips ?? [])[0];
+  // ov-api resolves a watchable clip (the incident's own, else the regular
+  // recording segment covering its window); fall back to the raw clips list.
+  const clipKey: string | null =
+    incident.clip_storage_key ?? clip?.storage_key ?? null;
+  const posterKey: string | null =
+    incident.clip_poster_key ?? clip?.poster_key ?? null;
 
   return (
     <>
@@ -69,11 +75,15 @@ export default function IncidentDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Video clip */}
           <div className="lg:col-span-2 card p-0 overflow-hidden">
-            {clip ? (
+            {clipKey ? (
               <video
                 controls
-                src={`/api/clips/by-key/${encodeURIComponent(clip.storage_key)}`}
-                poster={clip.poster_key ? `/api/clips/by-key/${encodeURIComponent(clip.poster_key)}` : undefined}
+                src={`/api/clips/by-key/${encodeURIComponent(clipKey)}`}
+                poster={
+                  posterKey
+                    ? `/api/clips/by-key/${encodeURIComponent(posterKey)}`
+                    : undefined
+                }
                 className="w-full block bg-black"
               />
             ) : (
