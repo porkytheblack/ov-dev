@@ -90,6 +90,12 @@ services:
     environment:
       MODEL_PATH: /models/yolo11n.pt
       IMGSZ: "480"
+      # yolo11n @ 480 is weak: at the 0.35 default it fires "person" on empty
+      # grass/shadows/foliage, flooding the timeline with phantom incidents
+      # whose clips show nobody. 0.5 cuts the bulk of those false positives
+      # (observed person dets clustered 0.35–0.5 on an empty scene) while
+      # keeping genuine pass-throughs (which scored 0.6–0.72). Tune per site.
+      CONFIDENCE_THRESHOLD: "0.5"
       # ByteTrack instead of BoT-SORT: keeps track_id (incident dedup) but
       # drops BoT-SORT's global motion compensation + optional ReID, which
       # roughly halve CPU throughput. Big speedup, same incident behaviour.
