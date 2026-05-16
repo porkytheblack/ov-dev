@@ -7,11 +7,21 @@ export type Polygon = Point[];
  * ROIs in the DB store polygons as either:
  *   - [[x,y], [x,y], ...]
  *   - [{x, y}, ...]
- * Normalize to {x,y}[].
+ *   - a JSON STRING of either of the above — older code double-encoded the
+ *     jsonb column (jsonb_typeof = string), so postgres.js hands us a string.
+ * Normalize to {x,y}[]. Returns [] when nothing usable is present.
  */
 export function normalizePolygon(raw: unknown): Polygon {
-  if (!Array.isArray(raw)) return [];
-  return raw
+  let v: unknown = raw;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(v)) return [];
+  return v
     .map((p) => {
       if (Array.isArray(p) && p.length >= 2) return { x: Number(p[0]), y: Number(p[1]) };
       if (p && typeof p === "object" && "x" in p && "y" in p) {
@@ -82,6 +92,41 @@ export type DetectionWindow =
       tz: string;
       days: number[];
     };
+
+/**
+ * detection_window is double-encoded the same way as polygon (jsonb holding a
+ * JSON string). Normalize string|object → DetectionWindow; anything unusable
+ * (including a malformed/empty window) degrades to "always" so a legacy ROI
+ * keeps detecting rather than silently going dark.
+ */
+export function normalizeWindow(raw: unknown): DetectionWindow {
+  let v: unknown = raw;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return { type: "always" };
+    }
+  }
+  if (!v || typeof v !== "object") return { type: "always" };
+  const w = v as {
+    type?: string;
+    start?: unknown;
+    end?: unknown;
+    tz?: unknown;
+    days?: unknown;
+  };
+  if (w.type === "time") {
+    return {
+      type: "time",
+      start: String(w.start ?? ""),
+      end: String(w.end ?? ""),
+      tz: String(w.tz || "UTC"),
+      days: Array.isArray(w.days) ? w.days.map(Number) : [],
+    };
+  }
+  return { type: "always" };
+}
 
 export function isWithinDetectionWindow(window: DetectionWindow | undefined, when: Date): boolean {
   if (!window || window.type === "always") return true;

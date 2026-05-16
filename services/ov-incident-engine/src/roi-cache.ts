@@ -1,6 +1,6 @@
 import postgres from "postgres";
 import type { DetectionWindow, Polygon } from "./matching/geometry.js";
-import { normalizePolygon } from "./matching/geometry.js";
+import { normalizePolygon, normalizeWindow } from "./matching/geometry.js";
 
 export type RoiRow = {
   id: string;
@@ -42,7 +42,11 @@ export class RoiCache {
                  notify_enabled AS "notifyEnabled"
           FROM rois
         `;
-    const normalized = rows.map((r) => ({ ...r, polygon: normalizePolygon(r.polygon) }));
+    const normalized = rows.map((r) => ({
+      ...r,
+      polygon: normalizePolygon(r.polygon),
+      detectionWindow: normalizeWindow(r.detectionWindow),
+    }));
     if (cameraId) {
       this.byCamera.set(cameraId, normalized);
     } else {
