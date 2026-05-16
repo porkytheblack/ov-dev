@@ -2,7 +2,11 @@
  * In-memory open-incident registry. Built fresh on boot from the DB and updated
  * by each FrameDetections event.
  */
-export type OpenIncidentKey = string; // `${cameraId}:${roiId}:${trackId|untracked}`
+// One incident represents a continuous span of activity in a zone. It is
+// keyed by (camera, roi) ONLY — never by track_id. Trackers churn ids for the
+// same object (and often emit none), which previously fragmented a single
+// walk-through into a pile of short, separately-keyed incidents.
+export type OpenIncidentKey = string; // `${cameraId}:${roiId}`
 
 export type OpenIncident = {
   incidentId: string;
@@ -20,8 +24,8 @@ export type OpenIncident = {
 export class OpenIncidents {
   private map = new Map<OpenIncidentKey, OpenIncident>();
 
-  static key(cameraId: string, roiId: string, trackId?: string | null): OpenIncidentKey {
-    return `${cameraId}:${roiId}:${trackId ?? "untracked"}`;
+  static key(cameraId: string, roiId: string): OpenIncidentKey {
+    return `${cameraId}:${roiId}`;
   }
 
   get(key: OpenIncidentKey): OpenIncident | undefined {

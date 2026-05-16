@@ -10,6 +10,12 @@ import { RoiCache } from "./roi-cache.js";
 const log = makeLogger("ov-incident-engine");
 const SWEEP_INTERVAL_MS = (parseInt(process.env.SWEEP_INTERVAL_SECONDS ?? "10") || 10) * 1000;
 const GRACE_PERIOD_MS = 5000;
+// How long a zone incident may go with NO matching detection before it's
+// considered over. Must comfortably bridge normal detection gaps (low sample
+// fps, intermittent visibility, tracker dropouts) so one continuous presence
+// stays one incident instead of fragmenting into many.
+const IDLE_CLOSE_MS =
+  (parseInt(process.env.INCIDENT_IDLE_TIMEOUT_SECONDS ?? "45") || 45) * 1000;
 
 export type EngineDeps = {
   databaseUrl: string;
@@ -38,7 +44,7 @@ export class IncidentEngine {
     const open = await this.store.loadOpen();
     const now = new Date();
     for (const o of open) {
-      const key = OpenIncidents.key(o.cameraId, o.roiId, o.trackId);
+      const key = OpenIncidents.key(o.cameraId, o.roiId);
       this.incidents.set(key, {
         incidentId: o.id,
         cameraId: o.cameraId,
@@ -123,11 +129,12 @@ export class IncidentEngine {
       for (const det of event.detections) {
         if (!roi.classesOfInterest.includes(det.class)) continue;
         if (!matchesRoi(det.bbox, roi.polygon, roi.matchMode)) continue;
-        const key = OpenIncidents.key(event.camera_id, roi.id, det.track_id);
+        const key = OpenIncidents.key(event.camera_id, roi.id);
         const existing = this.incidents.get(key);
         if (existing) {
           existing.lastSeenAt = ts;
           existing.classes.add(det.class);
+          if (!existing.trackId && det.track_id) existing.trackId = det.track_id;
           const elapsed = ts.getTime() - existing.openedAt.getTime();
           if (existing.notifyPending && elapsed >= roi.lingerThresholdSeconds * 1000) {
             await this.fireOpened(existing);
@@ -194,13 +201,28 @@ export class IncidentEngine {
     const now = Date.now();
     for (const [key, inc] of [...this.incidents.entries()]) {
       const idle = now - inc.lastSeenAt.getTime();
-      if (idle < GRACE_PERIOD_MS) continue;
+      // Bridge normal detection gaps: only act once the zone has been quiet
+      // for the full idle window (not a mere 5s), so sparse/low-fps presence
+      // stays a single incident.
+      if (idle < IDLE_CLOSE_MS) continue;
       if (inc.notifyPending) {
-        // Never reached linger threshold. Suppress.
-        await this.store.markSuppressed(inc.incidentId);
-        this.incidents.delete(key);
-        log.info({ incidentId: inc.incidentId }, "incident suppressed (linger not reached)");
-        continue;
+        const spanMs = inc.lastSeenAt.getTime() - inc.openedAt.getTime();
+        if (inc.notifyEnabled && spanMs >= inc.lingerThresholdSeconds * 1000) {
+          // Activity persisted past the linger threshold — it's a real
+          // incident even though the final detection didn't re-trigger the
+          // in-handler fire. Promote it instead of suppressing.
+          await this.fireOpened(inc);
+          inc.notifyPending = false;
+        } else {
+          // Brief blip that never met the linger threshold. Suppress.
+          await this.store.markSuppressed(inc.incidentId);
+          this.incidents.delete(key);
+          log.info(
+            { incidentId: inc.incidentId, spanMs },
+            "incident suppressed (linger not reached)",
+          );
+          continue;
+        }
       }
       const closedAt = new Date(inc.lastSeenAt.getTime() + GRACE_PERIOD_MS);
       await this.store.close(inc.incidentId, closedAt);
