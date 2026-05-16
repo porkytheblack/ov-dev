@@ -46,17 +46,19 @@ export function makeClipRoutes(sql: ReturnType<typeof postgres>) {
     }
   });
 
-  // Public (signed-link)-friendly raw stream by key.
-  app.get("/by-key/:encodedKey", async (c) => {
-    const encoded = c.req.param("encodedKey");
-    const key = decodeURIComponent(encoded);
+  // Public (signed-link)-friendly raw stream by key. The storage key contains
+  // slashes (clips/<kind>/<cam>/<Y>/<M>/<D>/<uuid>.mp4), so it MUST be captured
+  // as a wildcard — a single ":param" segment can never match a real key.
+  app.get("/by-key/:key{.+}", async (c) => {
+    const key = c.req.param("key");
     const isPoster = key.endsWith(".jpg");
     try {
       const obj = await minio.getObject(BUCKETS.clips, key);
       c.header("content-type", isPoster ? "image/jpeg" : "video/mp4");
+      c.header("cache-control", "private, max-age=3600");
       return c.body(obj as any);
     } catch (e) {
-      return c.json({ error: (e as Error).message }, 500);
+      return c.json({ error: (e as Error).message }, 404);
     }
   });
 

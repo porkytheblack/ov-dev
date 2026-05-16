@@ -55,9 +55,13 @@ app.get("/api/incidents/:id/playback", async (c) => {
 
 // Public clip-by-key for signed deep-link previews.
 const publicClips = makeClipRoutes(sql);
-app.get("/api/clips/by-key/:encodedKey", async (c) => {
+app.get("/api/clips/by-key/:rest{.+}", async (c) => {
+  // Forward the raw (still-encoded) sub-path so the inner wildcard route and
+  // its param-decoding stay consistent end to end.
+  const url = new URL(c.req.url);
+  const sub = url.pathname.replace(/^\/api\/clips/, "");
   return publicClips.fetch(
-    new Request(`http://internal/by-key/${c.req.param("encodedKey")}`, {
+    new Request(`http://internal${sub}${url.search}`, {
       method: c.req.method,
     }),
   );
