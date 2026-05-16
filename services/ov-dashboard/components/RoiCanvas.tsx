@@ -150,6 +150,10 @@ export function RoiCanvas({
   const [zoomPct, setZoomPct] = useState(100);
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [panning, setPanning] = useState(false);
+  // Viewport adopts the camera's TRUE aspect (no fixed 16:9 → no stretched
+  // "long rectangle", no giant letterbox bars for a portrait sensor like
+  // 960×1088). 16:9 is only the placeholder shape before the first frame.
+  const [aspect, setAspect] = useState(16 / 9);
 
   // The decoded snapshot + its natural pixel size.
   const imgElRef = useRef<HTMLImageElement | null>(null);
@@ -273,6 +277,7 @@ export function RoiCanvas({
     img.onload = () => {
       imgElRef.current = img;
       natRef.current = { w: img.naturalWidth || 1, h: img.naturalHeight || 1 };
+      setAspect((img.naturalWidth || 16) / (img.naturalHeight || 9));
       setImageError(null);
       setImageReady(true);
       if (!userAdjustedRef.current) fitView();
@@ -829,8 +834,8 @@ export function RoiCanvas({
     <div>
       <div
         ref={containerRef}
-        className="relative w-full bg-black border border-border rounded-md overflow-hidden"
-        style={{ aspectRatio: "16 / 9", maxHeight: "70vh" }}
+        className="relative w-full mx-auto bg-black border border-border rounded-md overflow-hidden"
+        style={{ aspectRatio: String(aspect), maxHeight: "72vh" }}
       >
         <canvas
           ref={canvasRef}

@@ -93,11 +93,70 @@ export function browserTz(): string {
   }
 }
 
+/**
+ * Tolerant polygon parse. ROIs written by older code are double-encoded:
+ * the `polygon` jsonb holds a JSON *string* (`jsonb_typeof = string`), not a
+ * jsonb array — so the API returns `polygon` as a string. New ROIs come back
+ * as an array. Points may be `{x,y}` or `[x,y]` (matches the incident
+ * engine's normalizePolygon). Returns [] when nothing usable is present.
+ */
+export function parsePolygon(raw: unknown): Pt[] {
+  let v: unknown = raw;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(v)) return [];
+  const out: Pt[] = [];
+  for (const p of v) {
+    if (
+      Array.isArray(p) &&
+      p.length >= 2 &&
+      Number.isFinite(Number(p[0])) &&
+      Number.isFinite(Number(p[1]))
+    ) {
+      out.push({ x: Number(p[0]), y: Number(p[1]) });
+    } else if (p && typeof p === "object" && "x" in p && "y" in p) {
+      const o = p as { x: unknown; y: unknown };
+      if (Number.isFinite(Number(o.x)) && Number.isFinite(Number(o.y)))
+        out.push({ x: Number(o.x), y: Number(o.y) });
+    }
+  }
+  return out;
+}
+
+/** Tolerant detection_window parse (same string/object double-encoding). */
+export function parseWindow(raw: unknown): DetectionWindow | null {
+  let v: unknown = raw;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return null;
+    }
+  }
+  if (!v || typeof v !== "object") return null;
+  const w = v as { type?: string; start?: unknown; end?: unknown; tz?: unknown; days?: unknown };
+  if (w.type === "time") {
+    return {
+      type: "time",
+      start: String(w.start ?? ""),
+      end: String(w.end ?? ""),
+      tz: String(w.tz || "UTC"),
+      days: Array.isArray(w.days) ? w.days.map(Number) : [],
+    };
+  }
+  if (w.type === "always") return { type: "always" };
+  return null;
+}
+
 /** Human-readable summary of a stored detection_window. */
-export function summarizeWindow(w: unknown): string {
-  if (!w || typeof w !== "object") return "Always";
-  const dw = w as Partial<DetectionWindow> & { type?: string };
-  if (dw.type !== "time") return "Always";
+export function summarizeWindow(raw: unknown): string {
+  const dw = parseWindow(raw);
+  if (!dw || dw.type !== "time") return "Always";
   const days = Array.isArray(dw.days) ? (dw.days as number[]) : [];
   let dayStr = "Every day";
   if (days.length > 0 && days.length < 7) {
@@ -143,27 +202,24 @@ export function freshDraft(zoneNumber: number): RoiDraft {
   };
 }
 
-/** Hydrate the form from a stored ROI. */
+/** Hydrate the form from a stored ROI (tolerant of string-encoded fields). */
 export function draftFromRoi(r: Roi): RoiDraft {
-  const w = r.detection_window;
-  const windowed = !!w && typeof w === "object" && w.type === "time";
+  const w = parseWindow(r.detection_window as unknown);
+  const tw = w && w.type === "time" ? w : null;
+  const poly = parsePolygon(r.polygon as unknown);
   return {
     name: r.name,
     description: r.description ?? "",
-    polygon: Array.isArray(r.polygon) ? r.polygon : null,
+    polygon: poly.length >= 3 ? poly : null,
     classes_of_interest: [...(r.classes_of_interest ?? [])],
     match_mode: r.match_mode === "iou" ? "iou" : "centroid",
     linger_threshold_seconds: Number(r.linger_threshold_seconds ?? 60),
     notify_enabled: r.notify_enabled !== false,
-    windowed,
-    winStart: windowed ? (w as Extract<DetectionWindow, { type: "time" }>).start : "18:00",
-    winEnd: windowed ? (w as Extract<DetectionWindow, { type: "time" }>).end : "06:00",
-    winTz: windowed
-      ? (w as Extract<DetectionWindow, { type: "time" }>).tz || browserTz()
-      : browserTz(),
-    winDays: windowed
-      ? [...((w as Extract<DetectionWindow, { type: "time" }>).days ?? [])]
-      : [1, 2, 3, 4, 5],
+    windowed: !!tw,
+    winStart: tw ? tw.start : "18:00",
+    winEnd: tw ? tw.end : "06:00",
+    winTz: tw ? tw.tz || browserTz() : browserTz(),
+    winDays: tw ? [...tw.days] : [1, 2, 3, 4, 5],
   };
 }
 

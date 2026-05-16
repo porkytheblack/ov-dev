@@ -8,6 +8,7 @@ import {
   draftDirty,
   draftFromRoi,
   freshDraft,
+  parsePolygon,
   roiPayload,
   validateDraft,
   type Pt,
@@ -314,7 +315,7 @@ export function StepRegions({
       rois.map((r) => ({
         id: r.id,
         name: r.name,
-        polygon: Array.isArray(r.polygon) ? r.polygon : [],
+        polygon: parsePolygon(r.polygon as unknown),
       })),
     [rois],
   );
