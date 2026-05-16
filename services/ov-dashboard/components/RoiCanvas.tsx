@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { roiColor } from "@/lib/roiColors";
 
-export type Pt = { x: number; y: number }; // normalized 0..1
+export type Pt = { x: number; y: number }; // normalized 0..1 of the IMAGE
 export type RoiLite = { id: string; name: string; polygon: Pt[] };
 
 export interface RoiCanvasProps {
@@ -24,9 +24,10 @@ export interface RoiCanvasProps {
   onAddComplete: () => void;
 }
 
-const MIN = 0.03; // minimum new-rect size (normalized)
-const HANDLE_PX = 11; // touch-friendly (>=10px)
-const VERTEX_PX = 12; // legacy-polygon vertex dot hit size
+const MIN = 0.03; // minimum committed new-rect size (normalized)
+const HANDLE_PX = 11; // resize handle box, constant SCREEN px
+const VERTEX_PX = 12; // legacy-polygon vertex dot, constant SCREEN px
+const CLICK_PX = 4; // pointer travel under this = a click, not a drag
 
 const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
 type Handle = (typeof HANDLES)[number];
@@ -36,11 +37,17 @@ type Rect = { x: number; y: number; w: number; h: number };
 type Drag =
   | { kind: "none" }
   | { kind: "new" }
+  | { kind: "pan" }
   | { kind: "move"; dx: number; dy: number }
   | { kind: "resize"; h: Handle }
   | { kind: "vertex"; i: number };
 
+/** Screen position of the image's top-left + its on-screen pixel size. */
+type View = { scale: number; panX: number; panY: number };
+
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+const clamp = (v: number, lo: number, hi: number) =>
+  Math.min(hi, Math.max(lo, v));
 
 function bbox(poly: Pt[]): Rect | null {
   if (!poly || poly.length < 2) return null;
@@ -109,13 +116,20 @@ function topVertex(poly: Pt[]): Pt {
 }
 
 /**
- * Multi-ROI editing canvas. Renders the live camera snapshot at its natural
- * aspect (shrink-wrap wrapper + absolutely-positioned overlay canvas, exactly
- * as the old RoiEditor) so normalized 0..1 coordinates map 1:1 to pixels.
+ * Region-of-interest editor.
  *
- * Every frame draws ALL stored ROIs (colored by their palette index) plus the
- * active geometry (`draftPolygon`) emphasized on top. Rectangles get 8 resize
- * handles + move; legacy non-rectangular polygons get draggable vertex dots.
+ * ONE canvas draws everything — the camera snapshot AND every ROI — under a
+ * single zoom/pan transform. Because the image is rendered with `drawImage`
+ * at its true `naturalW:naturalH` ratio (uniform `scale`, never two different
+ * scales), the frame can never be aspect-distorted into a "long rectangle",
+ * and an ROI can never drift out of register with the picture: they live in
+ * the same coordinate space by construction.
+ *
+ * Coordinates: ROI points are normalized 0..1 of the IMAGE (unchanged wire
+ * format). screen = pan + norm * (natural * scale). The viewport is a fixed
+ * 16:9 black frame; an off-ratio camera is letterboxed (not stretched) and
+ * the user can zoom (wheel / ± buttons) and pan (drag empty space, or hold
+ * Space) to reach any part of the field of view.
  */
 export function RoiCanvas({
   cameraId,
@@ -127,57 +141,167 @@ export function RoiCanvas({
   onDraftChange,
   onAddComplete,
 }: RoiCanvasProps) {
-  const imgRef = useRef<HTMLImageElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
 
   const [imageReady, setImageReady] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
+  const [zoomPct, setZoomPct] = useState(100);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [panning, setPanning] = useState(false);
+
+  // The decoded snapshot + its natural pixel size.
+  const imgElRef = useRef<HTMLImageElement | null>(null);
+  const natRef = useRef<{ w: number; h: number } | null>(null);
+  // Image top-left screen position (panX/panY) + screen-px-per-image-px.
+  const viewRef = useRef<View>({ scale: 1, panX: 0, panY: 0 });
+  // Once the user zooms/pans, a resize/refresh keeps their framing instead of
+  // snapping back to "fit".
+  const userAdjustedRef = useRef(false);
 
   const dragRef = useRef<Drag>({ kind: "none" });
   const anchorRef = useRef<Pt | null>(null);
-  // The active geometry RoiCanvas actually draws. Updated SYNCHRONOUSLY in the
-  // pointer handlers so the box renders immediately, independent of the parent
-  // round-trip (setState → prop → passive effect → rAF). When idle it tracks
-  // the draftPolygon prop so parent-driven changes (select, discard, save,
-  // deep-link) still render.
+  const downScreenRef = useRef<{ x: number; y: number } | null>(null);
+  const movedRef = useRef(false);
+  const panStartRef = useRef<{ px: number; py: number; panX: number; panY: number } | null>(
+    null,
+  );
+  const spaceRef = useRef(false);
+  // Active geometry the canvas actually draws — updated SYNCHRONOUSLY in the
+  // pointer handlers so the box renders the instant you drag, independent of
+  // the parent round-trip (setState → prop → effect). Idle, it tracks the
+  // prop so parent-driven changes (select / discard / save) still render.
   const liveDraftRef = useRef<Pt[] | null>(draftPolygon);
-  // Latest in-progress new rectangle, kept locally so the create/discard
-  // decision on pointer-up never depends on draftPolygon round-tripping back.
   const pendingNewRectRef = useRef<Rect | null>(null);
   const rafRef = useRef<number | null>(null); // draw scheduling
   const moveRafRef = useRef<number | null>(null); // pointer-move coalescing
 
-  // Stable callback refs so a changing parent identity never re-fires effects
-  // or detaches listeners mid-drag.
   const cb = useRef({ onSelect, onDraftChange, onAddComplete });
   useEffect(() => {
     cb.current = { onSelect, onDraftChange, onAddComplete };
   });
 
-  // Latest geometry/selection in refs for pointer handlers (avoids stale
-  // closures without re-binding listeners).
   const stateRef = useRef({ rois, selectedRoiId, draftPolygon, mode });
   useEffect(() => {
     stateRef.current = { rois, selectedRoiId, draftPolygon, mode };
   });
 
-  const refresh = useCallback(() => {
-    if (!imgRef.current) return;
-    setImageError(null);
-    imgRef.current.src = `/api/cameras/${cameraId}/snapshot?t=${Date.now()}`;
-  }, [cameraId]);
+  // ── Geometry helpers (depend on the live view transform) ────────────────
+  /** Image draw box in CSS px: origin + on-screen size. */
+  const disp = useCallback(() => {
+    const nat = natRef.current;
+    const v = viewRef.current;
+    const w = (nat?.w ?? 1) * v.scale;
+    const h = (nat?.h ?? 1) * v.scale;
+    return { ox: v.panX, oy: v.panY, w, h };
+  }, []);
 
-  // Initial load + retry-until-frame every 3s while no frame has arrived
-  // (preserved from the old RoiEditor).
+  const vpSize = useCallback(() => {
+    const c = canvasRef.current;
+    const r = c?.getBoundingClientRect();
+    return { w: Math.max(1, r?.width ?? 1), h: Math.max(1, r?.height ?? 1) };
+  }, []);
+
+  /** client (px) → normalized image coords (unclamped; caller clamps). */
+  const screenToNorm = useCallback(
+    (clientX: number, clientY: number): Pt => {
+      const c = canvasRef.current!;
+      const b = c.getBoundingClientRect();
+      const d = disp();
+      return {
+        x: (clientX - b.left - d.ox) / (d.w || 1),
+        y: (clientY - b.top - d.oy) / (d.h || 1),
+      };
+    },
+    [disp],
+  );
+
+  const clampPan = useCallback(() => {
+    const v = viewRef.current;
+    const d = disp();
+    const vp = vpSize();
+    // Smaller-than-viewport axis → center it; larger → edge-locked pan
+    // (pan ∈ [vpExt − extent, 0], i.e. you can't scroll past an edge).
+    const axis = (extent: number, vpExt: number, cur: number) =>
+      extent <= vpExt ? (vpExt - extent) / 2 : clamp(cur, vpExt - extent, 0);
+    v.panX = axis(d.w, vp.w, v.panX);
+    v.panY = axis(d.h, vp.h, v.panY);
+  }, [disp, vpSize]);
+
+  const applyZoom = useCallback(
+    (nextScale: number, centerX: number, centerY: number) => {
+      const nat = natRef.current;
+      if (!nat) return;
+      const vp = vpSize();
+      const fitScale = Math.min(vp.w / nat.w, vp.h / nat.h);
+      const lo = fitScale * 0.5;
+      const hi = fitScale * 16;
+      const v = viewRef.current;
+      const ns = clamp(nextScale, lo, hi);
+      // Keep the image point under (centerX,centerY) pinned across the zoom.
+      const ix = (centerX - v.panX) / v.scale;
+      const iy = (centerY - v.panY) / v.scale;
+      v.scale = ns;
+      v.panX = centerX - ix * ns;
+      v.panY = centerY - iy * ns;
+      userAdjustedRef.current = true;
+      clampPan();
+      setZoomPct(Math.round((ns / fitScale) * 100));
+    },
+    [vpSize, clampPan],
+  );
+
+  const fitView = useCallback(() => {
+    const nat = natRef.current;
+    if (!nat) return;
+    const vp = vpSize();
+    const scale = Math.min(vp.w / nat.w, vp.h / nat.h);
+    viewRef.current = {
+      scale,
+      panX: (vp.w - nat.w * scale) / 2,
+      panY: (vp.h - nat.h * scale) / 2,
+    };
+    userAdjustedRef.current = false;
+    setZoomPct(100);
+  }, [vpSize]);
+
+  // ── Snapshot loading ───────────────────────────────────────────────────
+  const loadSnapshot = useCallback(() => {
+    const img = new Image();
+    img.decoding = "async";
+    img.onload = () => {
+      imgElRef.current = img;
+      natRef.current = { w: img.naturalWidth || 1, h: img.naturalHeight || 1 };
+      setImageError(null);
+      setImageReady(true);
+      if (!userAdjustedRef.current) fitView();
+      else clampPan();
+      scheduleDraw();
+    };
+    img.onerror = () => {
+      setImageReady(false);
+      setImageError("Waiting for camera frames…");
+      scheduleDraw();
+    };
+    img.src = `/api/cameras/${cameraId}/snapshot?t=${Date.now()}`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraId, fitView, clampPan]);
+
+  const refresh = useCallback(() => {
+    setImageError(null);
+    loadSnapshot();
+  }, [loadSnapshot]);
+
+  // Initial load + retry every 3s until the first frame arrives.
   useEffect(() => {
-    refresh();
+    loadSnapshot();
     const i = setInterval(() => {
-      if (!imageReady) refresh();
+      if (!imgElRef.current) loadSnapshot();
     }, 3000);
     return () => clearInterval(i);
-  }, [refresh, imageReady]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraId]);
 
   // ── Rendering ──────────────────────────────────────────────────────────
   const draw = useCallback(() => {
@@ -194,54 +318,63 @@ export function RoiCanvas({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // DPR-sharp; draw in CSS px
     ctx.clearRect(0, 0, cssW, cssH);
 
+    const img = imgElRef.current;
+    if (!img) return; // viewport stays black; HTML overlay shows the status
+
+    const d = disp(); // image draw box in CSS px (true aspect)
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, d.ox, d.oy, d.w, d.h);
+
+    // norm (0..1 of image) → screen CSS px
+    const sx = (nx: number) => d.ox + nx * d.w;
+    const sy = (ny: number) => d.oy + ny * d.h;
+
     const { rois: allRois, selectedRoiId: selId } = stateRef.current;
-    // Active geometry comes from the synchronously-updated ref, never the
-    // (async) prop — that is what made the box not render while dragging.
     const draft = liveDraftRef.current;
+    const dragKind = dragRef.current.kind;
 
     const drawPolygon = (
       poly: Pt[],
       color: string,
-      opts: { active?: boolean; hover?: boolean },
+      opts: { active?: boolean; hover?: boolean; dashed?: boolean },
     ) => {
       if (poly.length < 2) return;
       ctx.beginPath();
       poly.forEach((p, idx) => {
-        const x = p.x * cssW;
-        const y = p.y * cssH;
+        const x = sx(p.x);
+        const y = sy(p.y);
         if (idx === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       });
       ctx.closePath();
-
-      // Translucent fill (slightly stronger when active / hovered).
-      ctx.fillStyle = hexToRgba(color, opts.active ? 0.2 : opts.hover ? 0.16 : 0.1);
+      ctx.fillStyle = hexToRgba(
+        color,
+        opts.active ? 0.2 : opts.hover ? 0.16 : 0.1,
+      );
       ctx.fill();
-
-      // Dark casing under an emphasized active stroke keeps it legible on
-      // bright scenes.
       if (opts.active) {
+        ctx.setLineDash([]);
         ctx.strokeStyle = "rgba(0,0,0,0.85)";
         ctx.lineWidth = 5;
         ctx.stroke();
       }
+      ctx.setLineDash(opts.dashed ? [6, 4] : []);
       ctx.strokeStyle = color;
       ctx.lineWidth = opts.active ? 2.5 : opts.hover ? 2 : 1.5;
       ctx.stroke();
+      ctx.setLineDash([]);
     };
 
     const drawLabel = (poly: Pt[], text: string, color: string) => {
       const tv = topVertex(poly);
-      const lx = tv.x * cssW;
-      const ly = tv.y * cssH;
-      ctx.font =
-        "600 11px var(--font-mono), ui-monospace, monospace";
+      const lx = sx(tv.x);
+      const ly = sy(tv.y);
+      ctx.font = "600 11px var(--font-mono), ui-monospace, monospace";
       const tw = ctx.measureText(text).width;
       const padX = 6;
-      const padY = 4;
       const bw = tw + padX * 2;
       const bh = 18;
-      // Clamp the pill inside the canvas; sit it just above the vertex.
       let bx = lx - 1;
       let by = ly - bh - 4;
       if (by < 0) by = ly + 4;
@@ -256,11 +389,11 @@ export function RoiCanvas({
       ctx.stroke();
       ctx.fillStyle = color;
       ctx.textBaseline = "middle";
-      ctx.fillText(text, bx + padX, by + bh / 2 + padY / 2 - 1);
+      ctx.fillText(text, bx + padX, by + bh / 2 + 1);
     };
 
-    // 1) All stored ROIs except the selected one (selected is drawn from the
-    //    live draft on top so edits are visible immediately).
+    // 1) Every stored ROI except the selected one (the selected zone is drawn
+    //    from the live draft so edits show immediately).
     allRois.forEach((r, i) => {
       if (r.id === selId) return;
       const color = roiColor(i);
@@ -268,54 +401,51 @@ export function RoiCanvas({
       drawLabel(r.polygon, r.name, color);
     });
 
-    // 2) Active geometry: the selected ROI's working copy, or an in-progress
-    //    new rectangle. Drawn emphasized, on top.
+    // 2) Active geometry: in-progress new rectangle (dashed marquee, like a
+    //    Figma frame) or the selected zone's working copy (solid + handles).
     if (draft && draft.length >= 2) {
       const selIdx = allRois.findIndex((r) => r.id === selId);
-      const color = selIdx >= 0 ? roiColor(selIdx) : "var(--accent)";
-      const resolved =
-        color === "var(--accent)" ? cssVar("--accent", "#f5ad4a") : color;
-      drawPolygon(draft, resolved, { active: true });
-      const selName =
-        selIdx >= 0 ? allRois[selIdx].name : undefined;
-      if (selName) drawLabel(draft, selName, resolved);
+      const color = selIdx >= 0 ? roiColor(selIdx) : cssVar("--accent", "#f5ad4a");
+      const drawingNew = dragKind === "new";
+      drawPolygon(draft, color, { active: !drawingNew, dashed: drawingNew });
+      if (selIdx >= 0) drawLabel(draft, allRois[selIdx].name, color);
 
-      // Editing affordances for the active polygon.
-      if (isRect(draft) || draft.length === 4) {
-        const r = bbox(draft);
-        if (r) {
-          ctx.fillStyle = resolved;
+      if (!drawingNew) {
+        if (isRect(draft) || draft.length === 4) {
+          const r = bbox(draft);
+          if (r) {
+            ctx.fillStyle = color;
+            ctx.strokeStyle = "rgba(0,0,0,0.85)";
+            ctx.lineWidth = 1;
+            for (const hd of HANDLES) {
+              const [hx, hy] = handlePos(hd, r);
+              const px = sx(hx);
+              const py = sy(hy);
+              ctx.beginPath();
+              ctx.rect(
+                px - HANDLE_PX / 2,
+                py - HANDLE_PX / 2,
+                HANDLE_PX,
+                HANDLE_PX,
+              );
+              ctx.fill();
+              ctx.stroke();
+            }
+          }
+        } else {
+          ctx.fillStyle = color;
           ctx.strokeStyle = "rgba(0,0,0,0.85)";
           ctx.lineWidth = 1;
-          for (const hd of HANDLES) {
-            const [hx, hy] = handlePos(hd, r);
-            const px = hx * cssW;
-            const py = hy * cssH;
+          draft.forEach((p) => {
             ctx.beginPath();
-            ctx.rect(
-              px - HANDLE_PX / 2,
-              py - HANDLE_PX / 2,
-              HANDLE_PX,
-              HANDLE_PX,
-            );
+            ctx.arc(sx(p.x), sy(p.y), VERTEX_PX / 2, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
-          }
+          });
         }
-      } else {
-        // Legacy non-rectangular polygon: draggable vertex dots.
-        ctx.fillStyle = resolved;
-        ctx.strokeStyle = "rgba(0,0,0,0.85)";
-        ctx.lineWidth = 1;
-        draft.forEach((p) => {
-          ctx.beginPath();
-          ctx.arc(p.x * cssW, p.y * cssH, VERTEX_PX / 2, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-        });
       }
     }
-  }, [hoverId]);
+  }, [hoverId, disp]);
 
   const scheduleDraw = useCallback(() => {
     if (rafRef.current != null) return;
@@ -325,8 +455,6 @@ export function RoiCanvas({
     });
   }, [draw]);
 
-  // Set the active geometry, repaint NOW, and inform the parent. Used by every
-  // interactive geometry change so the canvas never waits on the prop echo.
   const pushDraft = useCallback(
     (poly: Pt[] | null) => {
       liveDraftRef.current = poly;
@@ -336,23 +464,49 @@ export function RoiCanvas({
     [scheduleDraw],
   );
 
-  // Redraw on any input change. While not mid-drag, keep the live ref in sync
-  // with the prop so parent-driven changes (select / discard / save / deep-
-  // link) render; during a drag the pointer handlers own the live ref.
+  // Redraw on input change. While idle, keep the live ref synced to the prop
+  // so parent-driven changes render; during a drag the handlers own it.
   useEffect(() => {
     if (dragRef.current.kind === "none") liveDraftRef.current = draftPolygon;
     scheduleDraw();
   }, [scheduleDraw, rois, selectedRoiId, draftPolygon, mode, imageReady, hoverId]);
 
-  // ResizeObserver on the wrapper (NOT window.resize) keeps the overlay
-  // pixel-aligned with the shrink-wrapped image at any container width.
+  // Keep the overlay pixel-aligned + framing sane as the panel resizes.
   useEffect(() => {
-    const el = wrapRef.current;
+    const el = containerRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => scheduleDraw());
+    const ro = new ResizeObserver(() => {
+      if (!natRef.current) {
+        scheduleDraw();
+        return;
+      }
+      if (userAdjustedRef.current) clampPan();
+      else fitView();
+      scheduleDraw();
+    });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [scheduleDraw]);
+  }, [scheduleDraw, clampPan, fitView]);
+
+  // Wheel zoom — must be a non-passive listener to preventDefault the scroll.
+  useEffect(() => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!natRef.current) return;
+      e.preventDefault();
+      const b = c.getBoundingClientRect();
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      applyZoom(
+        viewRef.current.scale * factor,
+        e.clientX - b.left,
+        e.clientY - b.top,
+      );
+      scheduleDraw();
+    };
+    c.addEventListener("wheel", onWheel, { passive: false });
+    return () => c.removeEventListener("wheel", onWheel);
+  }, [applyZoom, scheduleDraw]);
 
   useEffect(
     () => () => {
@@ -362,25 +516,15 @@ export function RoiCanvas({
     [],
   );
 
-  // ── Pointer interaction ────────────────────────────────────────────────
-  function ptr(e: React.PointerEvent): Pt & { w: number; h: number } {
-    const c = canvasRef.current!;
-    const b = c.getBoundingClientRect();
-    return {
-      x: clamp01((e.clientX - b.left) / b.width),
-      y: clamp01((e.clientY - b.top) / b.height),
-      w: b.width,
-      h: b.height,
-    };
-  }
-
-  function hitHandle(p: Pt, w: number, h: number): Handle | null {
+  // ── Hit-testing (normalized space; tolerances are constant SCREEN px) ────
+  function hitHandle(p: Pt): Handle | null {
     const draft = liveDraftRef.current;
     if (!draft || !(isRect(draft) || draft.length === 4)) return null;
     const r = bbox(draft);
     if (!r) return null;
-    const tolX = (HANDLE_PX + 6) / w;
-    const tolY = (HANDLE_PX + 6) / h;
+    const d = disp();
+    const tolX = (HANDLE_PX + 6) / (d.w || 1);
+    const tolY = (HANDLE_PX + 6) / (d.h || 1);
     for (const hd of HANDLES) {
       const [hx, hy] = handlePos(hd, r);
       if (Math.abs(p.x - hx) <= tolX && Math.abs(p.y - hy) <= tolY) return hd;
@@ -388,11 +532,12 @@ export function RoiCanvas({
     return null;
   }
 
-  function hitVertex(p: Pt, w: number, h: number): number | null {
+  function hitVertex(p: Pt): number | null {
     const draft = liveDraftRef.current;
     if (!draft || isRect(draft) || draft.length === 4) return null;
-    const tolX = (VERTEX_PX + 6) / w;
-    const tolY = (VERTEX_PX + 6) / h;
+    const d = disp();
+    const tolX = (VERTEX_PX + 6) / (d.w || 1);
+    const tolY = (VERTEX_PX + 6) / (d.h || 1);
     for (let i = 0; i < draft.length; i++) {
       if (
         Math.abs(p.x - draft[i].x) <= tolX &&
@@ -403,7 +548,6 @@ export function RoiCanvas({
     return null;
   }
 
-  /** Topmost ROI under the point (last-drawn wins for overlaps). */
   function hitRoi(p: Pt): string | null {
     const all = stateRef.current.rois;
     for (let i = all.length - 1; i >= 0; i--) {
@@ -412,34 +556,55 @@ export function RoiCanvas({
     return null;
   }
 
+  // ── Pointer interaction ────────────────────────────────────────────────
+  function beginPan(e: React.PointerEvent) {
+    dragRef.current = { kind: "pan" };
+    panStartRef.current = {
+      px: e.clientX,
+      py: e.clientY,
+      panX: viewRef.current.panX,
+      panY: viewRef.current.panY,
+    };
+    setPanning(true);
+  }
+
   function onPointerDown(e: React.PointerEvent) {
-    if (!imageReady) return;
+    if (!imgElRef.current) return;
     canvasRef.current?.focus();
     (e.target as Element).setPointerCapture?.(e.pointerId);
-    const p = ptr(e);
-    const m = stateRef.current.mode;
-    const draft = liveDraftRef.current;
+    downScreenRef.current = { x: e.clientX, y: e.clientY };
+    movedRef.current = false;
 
-    // Draw mode: anchor a brand-new rectangle.
-    if (m === "draw") {
-      dragRef.current = { kind: "new" };
-      anchorRef.current = { x: p.x, y: p.y };
-      pendingNewRectRef.current = { x: p.x, y: p.y, w: 0, h: 0 };
-      pushDraft(rectToPoly({ x: p.x, y: p.y, w: 0, h: 0 }));
+    const m = stateRef.current.mode;
+    const p = screenToNorm(e.clientX, e.clientY);
+
+    // Middle-button or Space-held = pan, regardless of tool.
+    if (e.button === 1 || spaceRef.current) {
+      beginPan(e);
       return;
     }
 
-    // Edit affordances on the active polygon take priority.
-    const hd = hitHandle(p, p.w, p.h);
+    if (m === "draw") {
+      const a = { x: clamp01(p.x), y: clamp01(p.y) };
+      dragRef.current = { kind: "new" };
+      anchorRef.current = a;
+      pendingNewRectRef.current = { x: a.x, y: a.y, w: 0, h: 0 };
+      pushDraft(rectToPoly({ x: a.x, y: a.y, w: 0, h: 0 }));
+      return;
+    }
+
+    // Select mode: edit affordances on the active polygon take priority.
+    const hd = hitHandle(p);
     if (hd) {
       dragRef.current = { kind: "resize", h: hd };
       return;
     }
-    const vi = hitVertex(p, p.w, p.h);
+    const vi = hitVertex(p);
     if (vi != null) {
       dragRef.current = { kind: "vertex", i: vi };
       return;
     }
+    const draft = liveDraftRef.current;
     if (draft && pointInPoly(p.x, p.y, draft)) {
       const b = bbox(draft);
       dragRef.current = {
@@ -449,42 +614,44 @@ export function RoiCanvas({
       };
       return;
     }
-
-    // Otherwise: hit-test stored ROIs (select) or empty space (deselect).
     const id = hitRoi(p);
-    dragRef.current = { kind: "none" };
-    cb.current.onSelect(id);
+    if (id) {
+      dragRef.current = { kind: "none" };
+      cb.current.onSelect(id);
+      return;
+    }
+    // Empty space: a drag pans the field of view; a click (no travel)
+    // deselects. The deselect is deferred to pointer-up so a pan never
+    // clears the selection.
+    beginPan(e);
   }
 
   function applyMove(p: Pt) {
     const d = dragRef.current;
 
-    // A brand-new rectangle is derived purely from the anchor + pointer; it
-    // must NOT wait for draftPolygon to round-trip through the parent (that
-    // state arrives a render later, so gating on it dropped every move and the
-    // box never appeared while dragging).
     if (d.kind === "new") {
       const a = anchorRef.current ?? p;
+      const cp = { x: clamp01(p.x), y: clamp01(p.y) };
       const nr = {
-        x: Math.min(a.x, p.x),
-        y: Math.min(a.y, p.y),
-        w: Math.abs(p.x - a.x),
-        h: Math.abs(p.y - a.y),
+        x: Math.min(a.x, cp.x),
+        y: Math.min(a.y, cp.y),
+        w: Math.abs(cp.x - a.x),
+        h: Math.abs(cp.y - a.y),
       };
       pendingNewRectRef.current = nr;
       pushDraft(rectToPoly(nr));
       return;
     }
 
-    // Move/resize/vertex edits operate on the existing draft geometry.
     const draft = liveDraftRef.current;
     if (!draft) return;
 
     if (d.kind === "vertex") {
-      const next = draft.map((pt, i) =>
-        i === d.i ? { x: clamp01(p.x), y: clamp01(p.y) } : pt,
+      pushDraft(
+        draft.map((pt, i) =>
+          i === d.i ? { x: clamp01(p.x), y: clamp01(p.y) } : pt,
+        ),
       );
-      pushDraft(next);
       return;
     }
 
@@ -517,8 +684,8 @@ export function RoiCanvas({
         rectToPoly({
           x: clamp01(x),
           y: clamp01(y),
-          w: Math.min(w, 1 - x),
-          h: Math.min(h, 1 - y),
+          w: Math.min(w, 1 - clamp01(x)),
+          h: Math.min(h, 1 - clamp01(y)),
         }),
       );
     }
@@ -526,11 +693,30 @@ export function RoiCanvas({
 
   function onPointerMove(e: React.PointerEvent) {
     const d = dragRef.current;
-    const p = ptr(e);
+
+    const down = downScreenRef.current;
+    if (down && !movedRef.current) {
+      if (
+        Math.abs(e.clientX - down.x) > CLICK_PX ||
+        Math.abs(e.clientY - down.y) > CLICK_PX
+      )
+        movedRef.current = true;
+    }
+
+    if (d.kind === "pan") {
+      const s = panStartRef.current;
+      if (!s) return;
+      viewRef.current.panX = s.panX + (e.clientX - s.px);
+      viewRef.current.panY = s.panY + (e.clientY - s.py);
+      userAdjustedRef.current = true;
+      clampPan();
+      scheduleDraw();
+      return;
+    }
 
     if (d.kind === "none") {
-      // Hover highlight (only meaningful in select mode, off the draft).
-      if (stateRef.current.mode === "select") {
+      if (stateRef.current.mode === "select" && !spaceRef.current) {
+        const p = screenToNorm(e.clientX, e.clientY);
         const draft = liveDraftRef.current;
         const overDraft = draft ? pointInPoly(p.x, p.y, draft) : false;
         const id = overDraft ? null : hitRoi(p);
@@ -538,8 +724,8 @@ export function RoiCanvas({
       }
       return;
     }
-    // rAF-coalesce the geometry update (its own ref so it never cancels a
-    // pending redraw, and a redraw never cancels it).
+
+    const p = screenToNorm(e.clientX, e.clientY);
     if (moveRafRef.current != null) cancelAnimationFrame(moveRafRef.current);
     moveRafRef.current = requestAnimationFrame(() => {
       moveRafRef.current = null;
@@ -551,25 +737,42 @@ export function RoiCanvas({
     const d = dragRef.current;
     dragRef.current = { kind: "none" };
     anchorRef.current = null;
-    // Flush any coalesced move so the final geometry isn't lost.
+    panStartRef.current = null;
     if (moveRafRef.current != null) {
       cancelAnimationFrame(moveRafRef.current);
       moveRafRef.current = null;
+    }
+    if (d.kind === "pan") {
+      setPanning(false);
+      // Empty-space click with no travel = deselect.
+      if (!movedRef.current && stateRef.current.mode === "select") {
+        cb.current.onSelect(null);
+      }
+      scheduleDraw();
+      return;
     }
     if (d.kind === "new") {
       const r = pendingNewRectRef.current;
       pendingNewRectRef.current = null;
       if (!r || r.w < MIN || r.h < MIN) {
-        // Click without a real drag — discard the empty rect, stay in draw.
-        pushDraft(null);
+        pushDraft(null); // click without a real drag — stay in draw
       } else {
         pushDraft(rectToPoly(r));
         cb.current.onAddComplete();
       }
     }
+    scheduleDraw(); // repaint solid + handles now the marquee is committed
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key === " " || e.code === "Space") {
+      if (!spaceRef.current) {
+        spaceRef.current = true;
+        setSpaceHeld(true);
+      }
+      e.preventDefault();
+      return;
+    }
     const draft = liveDraftRef.current;
     if (e.key === "Escape") {
       e.preventDefault();
@@ -586,7 +789,6 @@ export function RoiCanvas({
     else if (e.key === "ArrowRight") dx = step;
     else return;
     e.preventDefault();
-    // Clamp the whole polygon so no vertex leaves the frame.
     const minX = Math.min(...draft.map((p) => p.x));
     const maxX = Math.max(...draft.map((p) => p.x));
     const minY = Math.min(...draft.map((p) => p.y));
@@ -597,63 +799,95 @@ export function RoiCanvas({
     pushDraft(draft.map((p) => ({ x: p.x + dx, y: p.y + dy })));
   }
 
+  function onKeyUp(e: React.KeyboardEvent) {
+    if (e.key === " " || e.code === "Space") {
+      spaceRef.current = false;
+      setSpaceHeld(false);
+    }
+  }
+
+  const zoomBtn = (factor: number) => {
+    const vp = vpSize();
+    applyZoom(viewRef.current.scale * factor, vp.w / 2, vp.h / 2);
+    scheduleDraw();
+  };
+
   const cursor =
-    mode === "draw"
-      ? "cursor-crosshair"
-      : draftPolygon
-        ? "cursor-move"
-        : hoverId
-          ? "cursor-pointer"
-          : "cursor-default";
+    panning
+      ? "cursor-grabbing"
+      : spaceHeld
+        ? "cursor-grab"
+        : mode === "draw"
+          ? "cursor-crosshair"
+          : draftPolygon
+            ? "cursor-move"
+            : hoverId
+              ? "cursor-pointer"
+              : "cursor-default";
 
   return (
     <div>
-      <div className="flex justify-center bg-black border border-border rounded-md overflow-hidden">
-        <div
-          ref={wrapRef}
-          className="relative inline-block select-none leading-none"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            ref={imgRef}
-            alt=""
-            draggable={false}
-            className={`block max-h-[68vh] max-w-full w-auto ${
-              imageReady ? "opacity-100" : "opacity-0"
-            }`}
-            onLoad={() => {
-              setImageReady(true);
-              setImageError(null);
-              scheduleDraw();
-            }}
-            onError={() => {
-              setImageReady(false);
-              setImageError("Waiting for camera frames…");
-            }}
-          />
-          {!imageReady && (
-            <div className="absolute inset-0 flex items-center justify-center min-h-[260px] min-w-[360px]">
-              <div className="text-text-dim mono text-[11px] uppercase tracking-[0.08em]">
-                {imageError ?? "loading snapshot…"}
-              </div>
+      <div
+        ref={containerRef}
+        className="relative w-full bg-black border border-border rounded-md overflow-hidden"
+        style={{ aspectRatio: "16 / 9", maxHeight: "70vh" }}
+      >
+        <canvas
+          ref={canvasRef}
+          tabIndex={0}
+          role="application"
+          aria-label="Region of interest editor"
+          className={`absolute inset-0 w-full h-full outline-none touch-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--ring)] ${cursor}`}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onPointerLeave={() => {
+            if (dragRef.current.kind === "none" && hoverId) setHoverId(null);
+          }}
+          onKeyDown={onKeyDown}
+          onKeyUp={onKeyUp}
+        />
+        {!imageReady && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="text-text-dim mono text-[11px] uppercase tracking-[0.08em]">
+              {imageError ?? "loading snapshot…"}
             </div>
-          )}
-          <canvas
-            ref={canvasRef}
-            tabIndex={0}
-            role="application"
-            aria-label="Region of interest editor"
-            className={`absolute inset-0 w-full h-full outline-none touch-none focus-visible:ring-2 focus-visible:ring-[color:var(--ring)] ${cursor}`}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
-            onPointerLeave={() => {
-              if (dragRef.current.kind === "none" && hoverId) setHoverId(null);
-            }}
-            onKeyDown={onKeyDown}
-          />
-        </div>
+          </div>
+        )}
+
+        {/* Zoom / fit controls — overlaid bottom-right, out of the draw area. */}
+        {imageReady && (
+          <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded-md bg-[rgba(8,10,14,0.78)] border border-border-strong px-1 py-1">
+            <button
+              type="button"
+              title="Zoom out"
+              className="h-7 w-7 grid place-items-center rounded text-text-muted hover:text-text hover:bg-surface-elev"
+              onClick={() => zoomBtn(1 / 1.25)}
+            >
+              −
+            </button>
+            <button
+              type="button"
+              title="Fit to view"
+              className="h-7 px-2 rounded text-[11px] mono text-text-muted hover:text-text hover:bg-surface-elev tabular-nums"
+              onClick={() => {
+                fitView();
+                scheduleDraw();
+              }}
+            >
+              {zoomPct}%
+            </button>
+            <button
+              type="button"
+              title="Zoom in"
+              className="h-7 w-7 grid place-items-center rounded text-text-muted hover:text-text hover:bg-surface-elev"
+              onClick={() => zoomBtn(1.25)}
+            >
+              +
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-2 mt-3 flex-wrap">
@@ -662,10 +896,10 @@ export function RoiCanvas({
         </button>
         <span className="mono text-[11px] text-text-dim">
           {mode === "draw"
-            ? "Drag to draw — Esc to cancel"
+            ? "Drag to draw a region · Space-drag pans · scroll zooms · Esc cancels"
             : draftPolygon
-              ? "Drag the box or its handles to adjust · arrows nudge · Esc deselect"
-              : "Click a zone to edit it"}
+              ? "Drag the box / handles to adjust · arrows nudge · drag empty space to pan · Esc deselect"
+              : "Click a zone to edit · drag empty space (or Space) to pan · scroll to zoom"}
         </span>
       </div>
 
