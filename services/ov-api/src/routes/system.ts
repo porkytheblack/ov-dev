@@ -15,7 +15,9 @@ export function makeSystemRoutes(sql: ReturnType<typeof postgres>) {
       { name: "ov-agent", url: "http://ov-agent:3000/health" },
       { name: "ov-whatsapp", url: "http://ov-whatsapp:3010/health" },
       { name: "ov-telegram", url: "http://ov-telegram:8003/health" },
-      { name: "ov-stream-gateway", url: "http://ov-stream-gateway:8889/health" },
+      // 8989 = the gateway's own control server (Hono /health). 8889 is
+      // mediamtx's WebRTC port — no /health there → a false "offline".
+      { name: "ov-stream-gateway", url: "http://ov-stream-gateway:8989/health" },
     ];
     const results = await Promise.all(
       services.map(async (s) => {
