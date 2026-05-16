@@ -1,0 +1,45 @@
+{
+  admin off
+}
+
+# Local development - HTTP on port 80.
+# For production: set OVERWATCH_DOMAIN and uncomment the tls block.
+
+:80 {
+  encode gzip
+
+  # API + WebSocket
+  handle /api/* {
+    reverse_proxy ov-api:3001
+  }
+  handle /openapi.json {
+    reverse_proxy ov-api:3001
+  }
+  handle /events {
+    reverse_proxy ov-api:3001
+  }
+
+  # Live video / stream gateway. The gateway is on :8989 and proxies LL-HLS
+  # + WHEP from mediamtx (which listens internally on 8888/8889). The buffer
+  # must be off so LL-HLS partial segments stream out as they're produced.
+  handle /stream/* {
+    reverse_proxy ov-stream-gateway:8989 {
+      flush_interval -1
+    }
+  }
+
+  # WhatsApp webhook
+  handle /webhook/whatsapp* {
+    reverse_proxy ov-whatsapp:3010
+  }
+
+  # MinIO console (optional)
+  handle /minio-console/* {
+    reverse_proxy minio:9001
+  }
+
+  # Dashboard
+  handle {
+    reverse_proxy ov-dashboard:3000
+  }
+}

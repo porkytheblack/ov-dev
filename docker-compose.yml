@@ -1,0 +1,243 @@
+name: overwatch
+
+networks:
+  overwatch:
+    driver: bridge
+
+volumes:
+  pg-data:
+  redis-data:
+  minio-data:
+  caddy-data:
+  models:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks: [overwatch]
+    environment:
+      POSTGRES_DB: overwatch
+      POSTGRES_USER: overwatch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-overwatch}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U overwatch"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks: [overwatch]
+    command: redis-server /etc/redis/redis.conf
+    volumes:
+      - redis-data:/data
+      - ./infra/redis/redis.conf:/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    networks: [overwatch]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:-overwatch}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-overwatch-secret}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  ov-ingestor:
+    build:
+      context: .
+      dockerfile: services/ov-ingestor/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    # Tiny frames buffer: the CPU detector reads in batches, so a deep buffer
+    # means it chews stale frames and the live overlay trails reality. Keeping
+    # only ~1s of frames forces it onto near-current frames (older ones are
+    # trimmed and skipped), so detected boxes line up with what's on screen.
+    environment:
+      FRAMES_STREAM_MAXLEN: "6"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+  ov-detector:
+    build:
+      context: .
+      dockerfile: services/ov-detector/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    # CPU inference: the nano model + 480px keep detections frequent enough
+    # to actually catch movement (YOLO11L managed only ~1 det / 12s / camera).
+    # Point MODEL_PATH at /models/yolo11l.pt and raise IMGSZ on a GPU host.
+    environment:
+      MODEL_PATH: /models/yolo11n.pt
+      IMGSZ: "480"
+      # yolo11n @ 480 is weak: at the 0.35 default it fires "person" on empty
+      # grass/shadows/foliage, flooding the timeline with phantom incidents
+      # whose clips show nobody. 0.5 cuts the bulk of those false positives
+      # (observed person dets clustered 0.35–0.5 on an empty scene) while
+      # keeping genuine pass-throughs (which scored 0.6–0.72). Tune per site.
+      CONFIDENCE_THRESHOLD: "0.5"
+      # ByteTrack instead of BoT-SORT: keeps track_id (incident dedup) but
+      # drops BoT-SORT's global motion compensation + optional ReID, which
+      # roughly halve CPU throughput. Big speedup, same incident behaviour.
+      TRACKER_CONFIG: bytetrack.yaml
+    volumes:
+      - models:/models
+    depends_on:
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+  ov-clip-builder:
+    build:
+      context: .
+      dockerfile: services/ov-clip-builder/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+  ov-vlm:
+    build:
+      context: .
+      dockerfile: services/ov-vlm/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    # No longer profile-gated; the service idles until a camera with
+    # vlm_enabled = true produces an incident clip. Without a reachable
+    # VLM_ENDPOINT it just logs warnings and marks summary_status=failed.
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+
+  ov-incident-engine:
+    build:
+      context: .
+      dockerfile: services/ov-incident-engine/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  ov-notifier:
+    build:
+      context: .
+      dockerfile: services/ov-notifier/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  ov-agent:
+    build:
+      context: .
+      dockerfile: services/ov-agent/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  ov-whatsapp:
+    build:
+      context: .
+      dockerfile: services/ov-whatsapp/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      redis: { condition: service_healthy }
+      ov-agent: { condition: service_started }
+
+  ov-telegram:
+    build:
+      context: .
+      dockerfile: services/ov-telegram/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      redis: { condition: service_healthy }
+      ov-agent: { condition: service_started }
+
+  ov-api:
+    build:
+      context: .
+      dockerfile: services/ov-api/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  ov-stream-gateway:
+    build:
+      context: .
+      dockerfile: services/ov-stream-gateway/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    # WHEP signaling tunnels through Caddy:9090, but WebRTC media is direct
+    # browser↔mediamtx ICE — publish the single pinned ICE port to the host.
+    # WEBRTC_ADVERTISE_HOST is the address the SDP answer hands the browser;
+    # 127.0.0.1 for local access, or set to the host's LAN/Tailscale IP(s)
+    # (comma-separated) when the dashboard is opened from another machine.
+    environment:
+      WEBRTC_ADVERTISE_HOST: ${WEBRTC_ADVERTISE_HOST:-127.0.0.1}
+    ports:
+      - "8189:8189/udp"
+      - "8189:8189/tcp"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  ov-dashboard:
+    build:
+      context: .
+      dockerfile: services/ov-dashboard/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      - ov-api
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    networks: [overwatch]
+    ports:
+      - "9090:80"
+      - "9443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - ov-dashboard
+      - ov-api

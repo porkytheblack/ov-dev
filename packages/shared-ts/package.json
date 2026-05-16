@@ -1,0 +1,30 @@
+{
+  "name": "@overwatch/shared-ts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./redis": "./src/redis.ts",
+    "./db": "./src/db.ts",
+    "./minio": "./src/minio.ts",
+    "./logger": "./src/logger.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@overwatch/schemas": "workspace:*",
+    "drizzle-orm": "^0.30.10",
+    "ioredis": "^5.4.1",
+    "minio": "^7.1.3",
+    "pino": "^9.0.0",
+    "postgres": "^3.4.4",
+    "zod": "^3.23.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "typescript": "^5.4.5"
+  }
+}
