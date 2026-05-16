@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Nav } from "@/components/Nav";
 import { StatusPill } from "@/components/StatusPill";
-import { clipSeekSeconds } from "@/components/ClipModal";
+import { footageSrc, FOOTAGE_SEEK } from "@/components/ClipModal";
 import { formatTime } from "@/lib/format";
 
 export default function IncidentDetail() {
@@ -13,6 +13,7 @@ export default function IncidentDetail() {
   const router = useRouter();
   const id = params.id;
   const [incident, setIncident] = useState<any>(null);
+  const [vidFailed, setVidFailed] = useState(false);
 
   useEffect(() => {
     fetch(`/api/incidents/${id}`).then((r) => r.json()).then(setIncident);
@@ -41,15 +42,8 @@ export default function IncidentDetail() {
   }
 
   const clip = (incident.clips ?? [])[0];
-  // ov-api resolves a watchable clip (the incident's own, else the regular
-  // recording segment covering its window); fall back to the raw clips list.
-  const clipKey: string | null =
-    incident.clip_storage_key ?? clip?.storage_key ?? null;
   const posterKey: string | null =
     incident.clip_poster_key ?? clip?.poster_key ?? null;
-  const clipStartTs: string | null =
-    incident.clip_start_ts ?? clip?.start_ts ?? null;
-  const seek = clipSeekSeconds(incident.opened_at, clipStartTs);
 
   return (
     <>
@@ -79,29 +73,27 @@ export default function IncidentDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Video clip */}
           <div className="lg:col-span-2 card p-0 overflow-hidden">
-            {clipKey ? (
+            {!vidFailed ? (
               <video
                 controls
                 autoPlay
                 playsInline
-                src={`/api/clips/by-key/${encodeURIComponent(clipKey)}${
-                  seek > 0 ? `#t=${seek}` : ""
-                }`}
+                src={footageSrc(incident.id)}
                 poster={
                   posterKey
                     ? `/api/clips/by-key/${encodeURIComponent(posterKey)}`
                     : undefined
                 }
+                onError={() => setVidFailed(true)}
                 onLoadedMetadata={(e) => {
                   const v = e.currentTarget;
                   if (
-                    seek > 0 &&
                     Number.isFinite(v.duration) &&
-                    seek < v.duration - 0.5 &&
-                    Math.abs(v.currentTime - seek) > 1
+                    FOOTAGE_SEEK < v.duration - 0.5 &&
+                    Math.abs(v.currentTime - FOOTAGE_SEEK) > 1
                   ) {
                     try {
-                      v.currentTime = seek;
+                      v.currentTime = FOOTAGE_SEEK;
                     } catch {
                       /* ignore */
                     }
@@ -111,8 +103,10 @@ export default function IncidentDetail() {
               />
             ) : (
               <div className="aspect-video flex flex-col items-center justify-center gap-2 text-text-muted">
-                <p>Clip not ready yet.</p>
-                <p className="text-[13px] text-text-dim">The recording may still be processing.</p>
+                <p>No footage for this moment.</p>
+                <p className="text-[13px] text-text-dim">
+                  The recording that covers this incident isn’t available.
+                </p>
               </div>
             )}
           </div>

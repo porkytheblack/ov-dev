@@ -1,15 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { StatusPill } from "@/components/StatusPill";
 import { formatTime } from "@/lib/format";
 
-/**
- * The incident shape every list endpoint now returns. `clip_storage_key`
- * resolves to the incident's own clip, or the regular recording segment that
- * covers the incident's time window (see ov-api incidents clipResolver).
- */
+/** Incident shape used by the list/board views and this player. */
 export type ClipIncident = {
   id: string;
   camera_name?: string;
@@ -18,36 +14,24 @@ export type ClipIncident = {
   classes?: string[];
   roi_name?: string | null;
   summary?: string | null;
-  clip_storage_key?: string | null;
   clip_poster_key?: string | null;
   clip_kind?: string | null;
-  clip_start_ts?: string | null;
 };
+
+/**
+ * The /footage endpoint builds a short MP4 from the recording segments around
+ * the incident; the detection sits this many seconds in (server FOOTAGE_PRE_S
+ * − FOOTAGE_LEAD_S), so we start playback right there — no empty frames.
+ */
+export const FOOTAGE_SEEK = 4;
+
+/** Segment-accurate, seekable footage for an incident (302 → cached MP4). */
+export function footageSrc(id: string): string {
+  return `/api/incidents/${id}/footage#t=${FOOTAGE_SEEK}`;
+}
 
 function byKey(k?: string | null): string | undefined {
   return k ? `/api/clips/by-key/${encodeURIComponent(k)}` : undefined;
-}
-
-/**
- * Seconds into the resolved clip where the detection occurred, minus a short
- * lead-in so the viewer sees the subject enter rather than landing mid-action.
- * The resolved clip is often a 5-min recording segment, so without this the
- * user would have to scrub through minutes of empty frames.
- */
-export function clipSeekSeconds(
-  openedAt?: string,
-  clipStartTs?: string | null,
-  leadIn = 4,
-): number {
-  if (!openedAt || !clipStartTs) return 0;
-  const d =
-    (new Date(openedAt).getTime() - new Date(clipStartTs).getTime()) / 1000;
-  return Number.isFinite(d) ? Math.max(0, Math.round(d - leadIn)) : 0;
-}
-
-function mmss(total: number): string {
-  const s = Math.max(0, Math.round(total));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
 /** Full-screen, dismissible clip player for a single incident. */
@@ -58,6 +42,8 @@ export function ClipModal({
   incident: ClipIncident;
   onClose: () => void;
 }) {
+  const [failed, setFailed] = useState(false);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -71,15 +57,7 @@ export function ClipModal({
     };
   }, [onClose]);
 
-  const baseSrc = byKey(incident.clip_storage_key);
-  const seek = clipSeekSeconds(incident.opened_at, incident.clip_start_ts);
-  // Media fragment makes the browser start at the detection (no t=0 flash);
-  // onLoadedMetadata is the cross-browser safety net.
-  const src = baseSrc
-    ? seek > 0
-      ? `${baseSrc}#t=${seek}`
-      : baseSrc
-    : undefined;
+  const src = footageSrc(incident.id);
   const poster = byKey(incident.clip_poster_key);
   const classes = incident.classes ?? [];
 
@@ -107,14 +85,6 @@ export function ClipModal({
                 {formatTime(incident.opened_at)}
               </span>
             )}
-            {incident.clip_kind === "regular" && src && (
-              <span
-                className="mono text-[10px] text-text-dim uppercase tracking-[0.08em]"
-                title="No dedicated incident clip — showing the continuous recording that covers this moment"
-              >
-                recording
-              </span>
-            )}
           </div>
           <button
             type="button"
@@ -128,7 +98,7 @@ export function ClipModal({
 
         {/* Video */}
         <div className="bg-black flex-1 min-h-0">
-          {src ? (
+          {!failed ? (
             <>
               {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
               <video
@@ -138,16 +108,16 @@ export function ClipModal({
                 playsInline
                 poster={poster}
                 src={src}
+                onError={() => setFailed(true)}
                 onLoadedMetadata={(e) => {
                   const v = e.currentTarget;
                   if (
-                    seek > 0 &&
                     Number.isFinite(v.duration) &&
-                    seek < v.duration - 0.5 &&
-                    Math.abs(v.currentTime - seek) > 1
+                    FOOTAGE_SEEK < v.duration - 0.5 &&
+                    Math.abs(v.currentTime - FOOTAGE_SEEK) > 1
                   ) {
                     try {
-                      v.currentTime = seek;
+                      v.currentTime = FOOTAGE_SEEK;
                     } catch {
                       /* ignore */
                     }
@@ -155,18 +125,16 @@ export function ClipModal({
                 }}
                 className="w-full max-h-[60vh] block bg-black"
               />
-              {seek > 0 && (
-                <div className="px-4 py-1.5 text-[11px] text-text-dim mono border-t border-border bg-bg">
-                  ▶ Skipped to the detection · {mmss(seek)} into the
-                  recording — scrub back to see the full clip
-                </div>
-              )}
+              <div className="px-4 py-1.5 text-[11px] text-text-dim mono border-t border-border bg-bg">
+                ▶ Trimmed to the detection — scrub left for the few seconds
+                of lead-up
+              </div>
             </>
           ) : (
             <div className="aspect-video flex flex-col items-center justify-center gap-2 text-text-muted">
-              <p className="text-[14px]">Clip not ready yet.</p>
+              <p className="text-[14px]">No footage for this moment.</p>
               <p className="text-[12px] text-text-dim">
-                The recording for this moment is still processing.
+                The recording that covers this incident isn’t available.
               </p>
             </div>
           )}
