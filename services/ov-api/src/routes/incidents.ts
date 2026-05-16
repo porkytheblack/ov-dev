@@ -17,10 +17,10 @@ export function makeIncidentRoutes(sql: ReturnType<typeof postgres>) {
   const app = new Hono();
 
   // Resolve a watchable clip for an incident: prefer the incident's own clip,
-  // otherwise fall back to the continuous recording segment that covers the
-  // incident's time window for that camera (nearest by start). The clip
-  // pipeline may not have produced a dedicated incident clip — but a regular
-  // segment almost always covers the moment, so the user can still watch it.
+  // else the continuous recording segment that actually CONTAINS the moment
+  // of first detection (so the player can seek straight to it), else the
+  // nearest overlapping segment. clip_start_ts lets the UI jump playback to
+  // (opened_at − start_ts) instead of forcing the user through empty frames.
   const clipResolver = sql`
     LEFT JOIN LATERAL (
       SELECT x.storage_key, x.poster_key, x.kind, x.start_ts
@@ -35,6 +35,7 @@ export function makeIncidentRoutes(sql: ReturnType<typeof postgres>) {
          )
        ORDER BY (x.incident_id = i.id) DESC,
                 (x.kind = 'incident') DESC,
+                (x.start_ts <= i.opened_at AND x.end_ts >= i.opened_at) DESC,
                 abs(extract(epoch FROM (x.start_ts - i.opened_at))) ASC
        LIMIT 1
     ) clip ON true
@@ -50,7 +51,8 @@ export function makeIncidentRoutes(sql: ReturnType<typeof postgres>) {
              i.clip_status, i.summary_status, i.notified_at, i.acknowledged_at,
              clip.storage_key AS clip_storage_key,
              clip.poster_key  AS clip_poster_key,
-             clip.kind        AS clip_kind
+             clip.kind        AS clip_kind,
+             clip.start_ts    AS clip_start_ts
         FROM incidents i
         JOIN cameras c ON c.id = i.camera_id
         JOIN rois r ON r.id = i.roi_id
@@ -70,7 +72,8 @@ export function makeIncidentRoutes(sql: ReturnType<typeof postgres>) {
       SELECT i.*, c.name AS camera_name, r.name AS roi_name,
              clip.storage_key AS clip_storage_key,
              clip.poster_key  AS clip_poster_key,
-             clip.kind        AS clip_kind
+             clip.kind        AS clip_kind,
+             clip.start_ts    AS clip_start_ts
         FROM incidents i
         JOIN cameras c ON c.id = i.camera_id
         JOIN rois r ON r.id = i.roi_id
@@ -105,7 +108,9 @@ export function makeIncidentRoutes(sql: ReturnType<typeof postgres>) {
       SELECT i.id, i.camera_id, c.name AS camera_name, i.classes, i.opened_at,
              i.closed_at, i.summary, i.status,
              clip.storage_key AS clip_storage_key,
-             clip.poster_key  AS clip_poster_key
+             clip.poster_key  AS clip_poster_key,
+             clip.kind        AS clip_kind,
+             clip.start_ts    AS clip_start_ts
         FROM incidents i
         JOIN cameras c ON c.id = i.camera_id
         ${clipResolver}
@@ -113,6 +118,17 @@ export function makeIncidentRoutes(sql: ReturnType<typeof postgres>) {
     `;
     if (!rows[0]) return c.json({ error: "not found" }, 404);
     const r0 = rows[0];
+    // Seconds into the resolved clip where the detection happened, minus a
+    // short lead-in so the viewer sees the subject enter (never negative).
+    const LEAD_IN = 4;
+    let startOffset = 0;
+    if (r0.clip_start_ts && r0.opened_at) {
+      const delta =
+        (new Date(r0.opened_at).getTime() -
+          new Date(r0.clip_start_ts).getTime()) /
+        1000;
+      startOffset = Math.max(0, Math.round(delta - LEAD_IN));
+    }
     return c.json({
       incident: r0,
       clip: r0.clip_storage_key
@@ -124,6 +140,7 @@ export function makeIncidentRoutes(sql: ReturnType<typeof postgres>) {
       poster_url: r0.clip_poster_key
         ? `/api/clips/by-key/${encodeURIComponent(r0.clip_poster_key)}`
         : null,
+      start_offset_seconds: startOffset,
     });
   });
 
