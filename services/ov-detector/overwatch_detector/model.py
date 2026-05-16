@@ -84,10 +84,19 @@ class Detector:
             return []
         h, w = image.shape[:2]
         with self._lock:
-            results = self.model.track(
+            # STATELESS predict(), NOT track(persist=True). There is one shared
+            # detector_singleton with one model/tracker, fed by per-camera
+            # consumers from a hard-capped, heavily-sampled frames stream — so
+            # successive calls are non-contiguous frames, seconds–minutes apart,
+            # interleaved across cameras. A persistent ByteTrack/BoT-SORT under
+            # those conditions Kalman-coasts tracks onto later (and other
+            # cameras') empty frames and emits them with the carried confidence
+            # — phantom high-confidence "person" boxes on an empty scene, which
+            # became phantom incidents. Incident dedup is now zone-based
+            # (camera+roi), not track_id, so the tracker bought nothing and
+            # cost correctness. Per-frame detection is truthful and faster.
+            results = self.model.predict(
                 image,
-                persist=True,
-                tracker=self.tracker_cfg,
                 conf=self.conf_threshold,
                 iou=self.iou_threshold,
                 imgsz=self.imgsz,
