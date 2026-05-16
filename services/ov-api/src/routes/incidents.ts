@@ -44,6 +44,27 @@ function runFfmpeg(args: string[]): Promise<void> {
   });
 }
 
+/** First video stream codec_name of a file ("" if unknown). */
+function probeCodec(path: string): Promise<string> {
+  return new Promise((resolve) => {
+    const p = spawn("ffprobe", [
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=codec_name",
+      "-of",
+      "default=nw=1:nk=1",
+      path,
+    ]);
+    let out = "";
+    p.stdout.on("data", (d) => (out += d.toString()));
+    p.on("error", () => resolve(""));
+    p.on("close", () => resolve(out.trim()));
+  });
+}
+
 /**
  * Build (and cache, in the clips bucket) a short, seekable MP4 of the actual
  * recording around an incident, concatenated from the fine-grained `segments`
@@ -107,6 +128,12 @@ async function ensureIncidentFootage(
         "utf8",
       );
       const outPath = join(work, "out.mp4");
+      // Only stamp the HEVC-in-MP4 tag when the source is actually HEVC.
+      // Forcing -tag:v hvc1 on an H.264 stream makes ffmpeg fail to write the
+      // header → empty output → silent 404 (the builder only ever worked
+      // because the IP camera happened to be HEVC).
+      const codec = locals[0] ? await probeCodec(locals[0]) : "";
+      const tagArgs = codec === "hevc" ? ["-tag:v", "hvc1"] : [];
       await runFfmpeg([
         "-y",
         "-loglevel",
@@ -125,8 +152,7 @@ async function ensureIncidentFootage(
         "make_zero",
         "-movflags",
         "+faststart",
-        "-tag:v",
-        "hvc1",
+        ...tagArgs,
         outPath,
       ]);
       await minio.fPutObject(BUCKETS.clips, cacheKey, outPath, {
@@ -141,7 +167,8 @@ async function ensureIncidentFootage(
   inflight.set(id, build);
   try {
     return await build;
-  } catch {
+  } catch (e) {
+    console.error(`[footage] build failed for ${id}:`, (e as Error).message);
     return null;
   } finally {
     inflight.delete(id);
