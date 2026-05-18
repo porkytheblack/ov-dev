@@ -24,7 +24,7 @@ const v = (u: U) =>
         camera_id: string;
         classes: string[];
         frame_key?: string;
-        decision: "fire" | "false_alarm" | "undetermined";
+        decision: "fire" | "false_alarm" | "unavailable";
         reason: string;
       }
     | undefined;
@@ -32,9 +32,12 @@ const v = (u: U) =>
 export const adjudicateFire = broadcast("adjudicate-fire")
   .input(fireVerdict)
   .then(raiseFireAlert, {
-    // Alert on confirmed fire AND on undetermined (fail-open). Suppress only
-    // an explicit false alarm. A missing verdict object also fails open.
-    when: (u) => v(u)?.decision !== "false_alarm",
+    // Alert ONLY on an affirmative "fire" verdict. "false_alarm" and
+    // "unavailable" (MiMo unreachable / couldn't adjudicate) both suppress —
+    // the operator chose: no spam while MiMo is down. High-confidence fire
+    // never reaches here; the engine alerts it directly, independent of
+    // MiMo. This auto-resumes full behaviour once MiMo is reachable again.
+    when: (u) => v(u)?.decision === "fire",
     map: (u) => {
       const c = v(u)!;
       return { camera_id: c.camera_id, classes: c.classes, reason: c.reason };

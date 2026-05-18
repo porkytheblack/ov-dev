@@ -27,7 +27,7 @@ const Output = z.object({
   camera_id: z.string(),
   classes: z.array(z.string()),
   frame_key: z.string().optional(),
-  decision: z.enum(["fire", "false_alarm", "undetermined"]),
+  decision: z.enum(["fire", "false_alarm", "unavailable"]),
   reason: z.string(),
 });
 
@@ -56,17 +56,21 @@ export const fireVerdict = signal("fire-verdict")
       if (input.high_confidence) {
         return { ...base, decision: "fire" as const, reason: "high confidence" };
       }
+      // Can't adjudicate (no frame / MiMo not configured) → "unavailable".
+      // Per the operator's choice the uncertain band SUPPRESSES on
+      // unavailable while MiMo is unreachable; high-confidence fire still
+      // alerts engine-direct, independent of MiMo.
       if (!input.frame_key) {
         return {
           ...base,
-          decision: "undetermined" as const,
+          decision: "unavailable" as const,
           reason: "no frame retained",
         };
       }
       if (!mimoConfigured("vision")) {
         return {
           ...base,
-          decision: "undetermined" as const,
+          decision: "unavailable" as const,
           reason: "mimo vision not configured",
         };
       }
@@ -81,11 +85,11 @@ export const fireVerdict = signal("fire-verdict")
       } catch (e) {
         log.warn(
           { err: e, camera_id: input.camera_id, frame_key: input.frame_key },
-          "fire frame fetch failed; fail-open",
+          "fire frame fetch failed; cannot adjudicate",
         );
         return {
           ...base,
-          decision: "undetermined" as const,
+          decision: "unavailable" as const,
           reason: "frame unavailable",
         };
       }
@@ -101,23 +105,33 @@ export const fireVerdict = signal("fire-verdict")
         classes: input.classes,
         detectorConfidence: input.confidence,
       });
-      log.info(
+      const outcome =
+        res.verdict === "fire"
+          ? "fire confirmed → alerting"
+          : res.verdict === "false_alarm"
+            ? "false alarm → suppressed"
+            : "adjudicator unavailable → suppressed (high-confidence fire still alerts engine-direct)";
+      log.warn(
         {
           camera_id: input.camera_id,
           verdict: res.verdict,
           reason: res.reason,
           detectorConfidence: input.confidence,
         },
-        "fire verdict resolved",
+        `fire verdict: ${outcome}`,
       );
       return { ...base, decision: res.verdict, reason: res.reason };
     } catch (e) {
-      // Absolutely never throw out of the broadcast root — that would skip
-      // the alert node and silently drop a possible fire.
-      log.error({ err: e, camera_id: input.camera_id }, "fire-verdict crashed; fail-open");
+      // Never throw out of the broadcast root. Can't adjudicate → unavailable
+      // → suppressed for the uncertain band (operator's choice); a clearly
+      // visible fire reads high-confidence and alerts engine-direct anyway.
+      log.error(
+        { err: e, camera_id: input.camera_id },
+        "fire-verdict crashed; unavailable → suppressed",
+      );
       return {
         ...base,
-        decision: "undetermined" as const,
+        decision: "unavailable" as const,
         reason: "verdict error",
       };
     }
