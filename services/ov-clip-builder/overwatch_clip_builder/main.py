@@ -141,10 +141,19 @@ def _concat_segments(local_paths: list[Path], out_path: Path) -> None:
     Path(list_file).unlink(missing_ok=True)
 
 
-def _overlay_detections(in_path: Path, out_path: Path, detections: list[dict], window_start: datetime) -> None:
+def _overlay_detections(in_path: Path, out_path: Path, detections: list[dict], video_start: datetime) -> None:
     """Open the muxed MP4 with OpenCV, paint bounding boxes per detection at its
     corresponding timestamp, write a new H.264 file. Slower than concat but only
-    runs for incident clips."""
+    runs for incident clips.
+
+    `video_start` MUST be the wall-clock time of the FIRST frame of `in_path`
+    — i.e. the start_ts of the earliest concatenated segment — NOT the padded
+    incident window start. The concat is `-c copy` (untrimmed), so frame 0 is
+    a segment boundary that can sit many seconds before window_start; indexing
+    detections from anything but the true video start draws every box that
+    many seconds off (boxes float over empty space)."""
+    if video_start.tzinfo is None:
+        video_start = video_start.replace(tzinfo=timezone.utc)
     cap = cv2.VideoCapture(str(in_path))
     if not cap.isOpened():
         # Couldn't decode — fall back to the raw concat.
@@ -162,7 +171,11 @@ def _overlay_detections(in_path: Path, out_path: Path, detections: list[dict], w
         ts = d["ts"]
         if isinstance(ts, str):
             ts = datetime.fromisoformat(ts)
-        ms = int((ts - window_start).total_seconds() * 1000)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        ms = int((ts - video_start).total_seconds() * 1000)
+        if ms < 0:
+            continue  # detection precedes the footage we have — can't place it
         grouped.setdefault(ms // 100, []).append(d)
     for k in sorted(grouped.keys()):
         indexed.append((k, grouped[k]))
@@ -214,15 +227,24 @@ async def build_incident_clip(incident_id: str, camera_id: str, start_ts: dateti
     work = Path(tempfile.mkdtemp(prefix=f"ov-clip-{incident_id}-"))
     try:
         local_segs: list[Path] = []
+        # Wall-clock of the FIRST frame of the concat == start_ts of the
+        # earliest segment actually fetched (segs are start_ts-ordered and
+        # appended in order). The overlay MUST be indexed from this, not the
+        # padded incident window, or every box lands seconds off the object.
+        video_start: datetime | None = None
         for s in segs:
             lp = work / Path(s["storage_key"]).name
             try:
                 minio.fget_object(BUCKETS["segments"], s["storage_key"], str(lp))
                 local_segs.append(lp)
+                if video_start is None:
+                    video_start = s["start_ts"]
             except Exception as e:
                 log.warning("segment fetch failed", storage_key=s["storage_key"], error=str(e))
         if not local_segs:
             return
+        if video_start is None:
+            video_start = window_start
         concat_path = work / "concat.mp4"
         try:
             _concat_segments(local_segs, concat_path)
@@ -232,7 +254,7 @@ async def build_incident_clip(incident_id: str, camera_id: str, start_ts: dateti
         overlay_path = work / "overlay.mp4"
         detections = await _fetch_detections(camera_id, window_start, window_end)
         try:
-            _overlay_detections(concat_path, overlay_path, detections, window_start)
+            _overlay_detections(concat_path, overlay_path, detections, video_start)
         except Exception as e:
             log.warning("overlay failed, using raw", error=str(e))
             overlay_path = concat_path

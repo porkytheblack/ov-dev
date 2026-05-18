@@ -12,6 +12,7 @@ export type RoiRow = {
   detectionWindow: DetectionWindow;
   lingerThresholdSeconds: number;
   notifyEnabled: boolean;
+  kind: "include" | "exclude";
 };
 
 export class RoiCache {
@@ -22,7 +23,18 @@ export class RoiCache {
     this.sql = postgres(databaseUrl, { max: 4 });
   }
 
+  private ensured = false;
+
   async reload(cameraId?: string): Promise<void> {
+    if (!this.ensured) {
+      // Defensive: works even if the engine boots before ov-api runs the
+      // same idempotent migration. Selecting `kind` would otherwise throw
+      // on an un-migrated database.
+      await this.sql`ALTER TABLE rois ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'include'`.catch(
+        () => {},
+      );
+      this.ensured = true;
+    }
     const rows = cameraId
       ? await this.sql<RoiRow[]>`
           SELECT id, camera_id AS "cameraId", name, polygon,
@@ -30,7 +42,7 @@ export class RoiCache {
                  match_mode AS "matchMode",
                  detection_window AS "detectionWindow",
                  linger_threshold_seconds AS "lingerThresholdSeconds",
-                 notify_enabled AS "notifyEnabled"
+                 notify_enabled AS "notifyEnabled", kind
           FROM rois WHERE camera_id = ${cameraId}::uuid
         `
       : await this.sql<RoiRow[]>`
@@ -39,7 +51,7 @@ export class RoiCache {
                  match_mode AS "matchMode",
                  detection_window AS "detectionWindow",
                  linger_threshold_seconds AS "lingerThresholdSeconds",
-                 notify_enabled AS "notifyEnabled"
+                 notify_enabled AS "notifyEnabled", kind
           FROM rois
         `;
     const normalized = rows.map((r) => ({

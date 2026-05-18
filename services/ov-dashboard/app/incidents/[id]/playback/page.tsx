@@ -92,6 +92,7 @@ function PlaybackPage() {
             <video
               controls
               autoPlay
+              muted
               playsInline
               poster={data.poster_url ?? undefined}
               src={`${data.stream_url}${

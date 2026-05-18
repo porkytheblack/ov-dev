@@ -37,14 +37,48 @@
     --ring: rgba(245, 173, 74, 0.35);
   }
 
+  /* Light theme — calm warm-neutral, WCAG-AA text on the surfaces below.
+     Activated by data-theme="light" on <html> (set pre-paint by the
+     no-flash script in layout.tsx, toggled by <ThemeToggle/>). Every
+     surface routes through these vars, so the whole app re-themes with no
+     component changes. */
+  [data-theme="light"] {
+    --bg: #f4f5f8;
+    --surface: #ffffff;
+    --surface-elev: #ebedf2;
+    --border: #d7dbe2;
+    --border-strong: #b4bbc7;
+
+    --text: #181b21;
+    --text-muted: #525c69;
+    --text-dim: #586472;
+
+    --accent: #b5710c;
+    --accent-strong: #9c610a;
+    --accent-dim: #f1e3c6;
+
+    --success: #0c7a4d;
+    --danger: #c43535;
+
+    --on-accent: #ffffff;
+    --on-danger: #ffffff;
+
+    --accent-soft: rgba(181, 113, 12, 0.13);
+    --success-soft: rgba(12, 122, 77, 0.12);
+    --danger-soft: rgba(196, 53, 53, 0.1);
+    --ring: rgba(181, 113, 12, 0.4);
+  }
+
   html,
   body {
     background: var(--bg);
     color: var(--text);
     font-family: var(--font-sans), Inter, system-ui, sans-serif;
     font-weight: 400;
-    font-size: 15px;
-    line-height: 1.6;
+    /* Larger base for readability (older eyes); was 15px. Relaxed
+       line-height for a calmer, airier (ChatGPT-like) read. */
+    font-size: 16px;
+    line-height: 1.7;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
@@ -76,8 +110,8 @@
   .btn-ghost,
   .btn-danger {
     @apply inline-flex items-center justify-center gap-2 whitespace-nowrap
-           min-h-9 px-4 py-1.5 rounded-md
-           font-medium text-[13px] leading-none max-w-full
+           min-h-10 px-4 py-2 rounded-md
+           font-medium text-[14px] leading-none max-w-full
            border transition-colors duration-150 select-none cursor-pointer
            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--ring)]
            disabled:opacity-50 disabled:pointer-events-none;
@@ -104,7 +138,7 @@
 
   /* ---- Form controls ---------------------------------------------------- */
   .input {
-    @apply h-9 px-3 w-full bg-surface border border-border rounded-md
+    @apply h-10 px-3 w-full bg-surface border border-border rounded-md
            text-text font-mono text-[13px] placeholder:text-text-dim
            transition-colors duration-150
            focus:outline-none focus:border-accent
@@ -112,7 +146,7 @@
            disabled:opacity-50;
   }
   .input-text {
-    @apply h-9 px-3 w-full bg-surface border border-border rounded-md
+    @apply h-10 px-3 w-full bg-surface border border-border rounded-md
            text-text text-[14px] placeholder:text-text-dim
            transition-colors duration-150
            focus:outline-none focus:border-accent
@@ -122,7 +156,7 @@
 
   /* Repeated field-label pattern, now a single helper */
   .label {
-    @apply block font-mono uppercase tracking-[0.08em] text-text-dim text-[11px];
+    @apply block font-mono uppercase tracking-[0.08em] text-text-dim text-[12px];
   }
   /* Optional wrapper: stacks a .label above its control with consistent gap */
   .field {
@@ -131,13 +165,13 @@
 
   /* ---- Surfaces --------------------------------------------------------- */
   .card {
-    @apply bg-surface border border-border rounded-lg p-5 shadow-card;
+    @apply bg-surface border border-border rounded-2xl p-6 shadow-card;
   }
 
   /* ---- Pills / status badges ------------------------------------------- */
   .pill {
     @apply inline-flex items-center gap-1.5 font-mono uppercase
-           tracking-[0.06em] text-[10px] leading-none px-2.5 h-6
+           tracking-[0.06em] text-[11px] leading-none px-2.5 h-7
            rounded-full border whitespace-nowrap;
   }
   .pill-open {

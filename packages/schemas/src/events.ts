@@ -110,6 +110,20 @@ export const BotOutboxMessage = z.object({
     )
     .optional(),
   incident_id: z.string().uuid().optional(),
+  // Carry `incident_id` for message↔incident tracking (so resolving the
+  // incident can clean up every related message) WITHOUT rendering the
+  // action keyboard — e.g. the follow-up summary.
+  suppress_actions: z.boolean().optional(),
+  // Arbitrary URL buttons rendered as an inline keyboard (e.g. the recap's
+  // "open the calendar" deep links). Telegram-only; ignored on WhatsApp.
+  buttons: z
+    .array(z.object({ text: z.string(), url: z.string() }))
+    .optional(),
+  // Telegram-only: edit the existing tracked message for `incident_id` in
+  // place (caption/text) instead of sending a new one — e.g. the summary
+  // filling into the original clip alert. Ignored where unsupported
+  // (WhatsApp has no edit API → it still gets a follow-up).
+  edit: z.boolean().optional(),
 });
 export type BotOutboxMessage = z.infer<typeof BotOutboxMessage>;
 

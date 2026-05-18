@@ -11,9 +11,10 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.11.0",
+    "@overwatch/ai": "workspace:*",
     "@overwatch/schemas": "workspace:*",
     "@overwatch/shared-ts": "workspace:*",
-    "glove-core": "^3.0.0",
+    "glove-core": "^3.0.2",
     "hono": "^4.4.3",
     "ioredis": "^5.4.1",
     "postgres": "^3.4.4",

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BUCKETS, makeMinio } from "@overwatch/shared-ts";
 import { verifyDeepLink } from "../deep-link.js";
+import { getBroadcastRun, stationConfigured, triggerBroadcast } from "../station.js";
 
 const filterSchema = z.object({
   from: z.string().optional(),
@@ -44,26 +45,6 @@ function runFfmpeg(args: string[]): Promise<void> {
   });
 }
 
-/** First video stream codec_name of a file ("" if unknown). */
-function probeCodec(path: string): Promise<string> {
-  return new Promise((resolve) => {
-    const p = spawn("ffprobe", [
-      "-v",
-      "error",
-      "-select_streams",
-      "v:0",
-      "-show_entries",
-      "stream=codec_name",
-      "-of",
-      "default=nw=1:nk=1",
-      path,
-    ]);
-    let out = "";
-    p.stdout.on("data", (d) => (out += d.toString()));
-    p.on("error", () => resolve(""));
-    p.on("close", () => resolve(out.trim()));
-  });
-}
 
 /**
  * Build (and cache, in the clips bucket) a short, seekable MP4 of the actual
@@ -76,7 +57,10 @@ async function ensureIncidentFootage(
   sql: ReturnType<typeof postgres>,
   id: string,
 ): Promise<string | null> {
-  const cacheKey = `ondemand/${id}.mp4`;
+  // `.h264` in the key: footage is now transcoded to H.264 (below). The
+  // version suffix bypasses any pre-existing HEVC `-c copy` build that iOS
+  // Safari can't decode (the old "black box / crossed-out play" on phones).
+  const cacheKey = `ondemand/${id}.h264.mp4`;
   try {
     await minio.statObject(BUCKETS.clips, cacheKey);
     return cacheKey; // already built
@@ -128,12 +112,13 @@ async function ensureIncidentFootage(
         "utf8",
       );
       const outPath = join(work, "out.mp4");
-      // Only stamp the HEVC-in-MP4 tag when the source is actually HEVC.
-      // Forcing -tag:v hvc1 on an H.264 stream makes ffmpeg fail to write the
-      // header → empty output → silent 404 (the builder only ever worked
-      // because the IP camera happened to be HEVC).
-      const codec = locals[0] ? await probeCodec(locals[0]) : "";
-      const tagArgs = codec === "hevc" ? ["-tag:v", "hvc1"] : [];
+      // Transcode to H.264 + yuv420p + faststart (audio dropped — these are
+      // silent surveillance clips). The cameras are HEVC at odd
+      // resolutions/fps which iOS Safari refuses to play progressively
+      // (`-c copy` only ever worked on HEVC-capable desktops). H.264 main /
+      // yuv420p / +faststart is universally decodable (iOS, Android, all
+      // browsers). Even-dimension scale guards libx264's 4:2:0 requirement.
+      // Built once per incident and cached, so the transcode is one-time.
       await runFfmpeg([
         "-y",
         "-loglevel",
@@ -144,15 +129,25 @@ async function ensureIncidentFootage(
         "0",
         "-i",
         listPath,
-        "-c",
-        "copy",
+        "-vf",
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-profile:v",
+        "main",
+        "-pix_fmt",
+        "yuv420p",
+        "-crf",
+        "23",
+        "-an",
         "-fflags",
         "+genpts",
         "-avoid_negative_ts",
         "make_zero",
         "-movflags",
         "+faststart",
-        ...tagArgs,
         outPath,
       ]);
       await minio.fPutObject(BUCKETS.clips, cacheKey, outPath, {
@@ -249,6 +244,37 @@ export function makeIncidentRoutes(sql: ReturnType<typeof postgres>) {
     return c.json({ ...rows[0], clips: clipRows });
   });
 
+  // Timeline markers for the custom player: every detection on this
+  // incident's camera within the built footage window, expressed as an
+  // offset (seconds) into the clip so the scrubber can show ticks of
+  // "when things were found". The incident moment itself is at FOOTAGE_PRE_S.
+  app.get("/:id/markers", async (c) => {
+    const id = c.req.param("id");
+    const inc = await sql<{ camera_id: string; opened_at: Date }[]>`
+      SELECT camera_id, opened_at FROM incidents WHERE id = ${id}::uuid
+    `;
+    if (!inc[0]) return c.json({ error: "not found" }, 404);
+    const rows = await sql<{ t: number; classes: string[] }[]>`
+      SELECT floor((extract(epoch FROM (d.ts - ${inc[0].opened_at}::timestamptz))
+                     + ${FOOTAGE_PRE_S}) * 2) / 2 AS t,
+             array_agg(DISTINCT d.class) AS classes
+        FROM detections d
+       WHERE d.camera_id = ${inc[0].camera_id}::uuid
+         AND d.ts BETWEEN ${inc[0].opened_at}::timestamptz - make_interval(secs => ${FOOTAGE_PRE_S})
+                      AND ${inc[0].opened_at}::timestamptz + make_interval(secs => ${FOOTAGE_POST_S})
+       GROUP BY 1
+      HAVING floor((extract(epoch FROM (min(d.ts) - ${inc[0].opened_at}::timestamptz))
+                     + ${FOOTAGE_PRE_S}) * 2) / 2 >= 0
+       ORDER BY 1
+       LIMIT 400
+    `;
+    return c.json({
+      incident_t: FOOTAGE_PRE_S,
+      window_s: FOOTAGE_PRE_S + FOOTAGE_POST_S,
+      markers: rows.map((r) => ({ t: Number(r.t), classes: r.classes })),
+    });
+  });
+
   // Segment-accurate, browser-seekable footage of the incident. Builds once,
   // caches in the clips bucket, then redirects to the public Range-capable
   // by-key stream. The detection is FOOTAGE_PRE_S into the clip.
@@ -259,6 +285,79 @@ export function makeIncidentRoutes(sql: ReturnType<typeof postgres>) {
     return c.redirect(`/api/clips/by-key/${encodeURIComponent(key)}`, 302);
   });
 
+  // Trigger MiMo video analysis for this incident as a Station broadcast.
+  // The job runs async on ov-station; the client polls GET /:id/analysis.
+  app.post("/:id/analyze", async (c) => {
+    const id = c.req.param("id");
+    if (!stationConfigured()) {
+      return c.json(
+        { error: "station not configured", message: "STATION_API_KEY is not set — provision one (make station-key)." },
+        503,
+      );
+    }
+    const inc = await sql<{ camera_id: string }[]>`
+      SELECT camera_id FROM incidents WHERE id = ${id}::uuid
+    `;
+    if (!inc[0]) return c.json({ error: "not found" }, 404);
+
+    // Reuse the segment-accurate footage builder so analysis works for any
+    // incident, even without a pre-built incident clip.
+    const storageKey = await ensureIncidentFootage(sql, id);
+    if (!storageKey) {
+      return c.json({ error: "no recording covers this incident" }, 409);
+    }
+    const posterRow = await sql<{ poster_key: string | null }[]>`
+      SELECT poster_key FROM clips
+       WHERE incident_id = ${id}::uuid AND poster_key IS NOT NULL
+       ORDER BY (kind = 'incident') DESC, start_ts DESC
+       LIMIT 1
+    `;
+    const posterKey = posterRow[0]?.poster_key ?? undefined;
+
+    try {
+      const run = await triggerBroadcast("analyze-incident-clip", {
+        incident_id: id,
+        camera_id: inc[0].camera_id,
+        storage_key: storageKey,
+        poster_key: posterKey,
+        force: true,
+      });
+      const analysis = {
+        broadcast_run_id: run.id,
+        triggered_at: new Date().toISOString(),
+      };
+      await sql`
+        UPDATE incidents
+           SET summary_status = 'pending',
+               metadata = coalesce(metadata, '{}'::jsonb) || ${JSON.stringify({ analysis })}::jsonb
+         WHERE id = ${id}::uuid
+      `;
+      return c.json({ ok: true, broadcast_run_id: run.id, status: run.status });
+    } catch (e) {
+      return c.json({ error: "trigger failed", message: (e as Error).message }, 502);
+    }
+  });
+
+  // Lazy status/result of the analysis job. The summary lands on the
+  // incident when the broadcast's write-summary node completes.
+  app.get("/:id/analysis", async (c) => {
+    const id = c.req.param("id");
+    const rows = await sql<
+      { summary: string | null; summary_status: string; metadata: Record<string, any> | null }[]
+    >`
+      SELECT summary, summary_status, metadata FROM incidents WHERE id = ${id}::uuid
+    `;
+    if (!rows[0]) return c.json({ error: "not found" }, 404);
+    const runId: string | undefined = rows[0].metadata?.analysis?.broadcast_run_id;
+    const run = runId ? await getBroadcastRun(runId) : null;
+    return c.json({
+      summary_status: rows[0].summary_status,
+      summary: rows[0].summary,
+      run: run ? { id: run.id, status: run.status } : null,
+      triggered_at: rows[0].metadata?.analysis?.triggered_at ?? null,
+    });
+  });
+
   app.post("/:id/acknowledge", async (c) => {
     const id = c.req.param("id");
     await sql`
@@ -266,6 +365,32 @@ export function makeIncidentRoutes(sql: ReturnType<typeof postgres>) {
        WHERE id = ${id}::uuid
     `;
     return c.json({ ok: true });
+  });
+
+  // General incident-response status change (acknowledge / suppress /
+  // close / re-open). Mirrors the agent's set_incident_status tool.
+  const STATUSES = ["open", "acknowledged", "suppressed", "closed"] as const;
+  app.post("/:id/status", async (c) => {
+    const id = c.req.param("id");
+    const body = (await c.req.json().catch(() => ({}))) as { status?: string };
+    if (!body.status || !STATUSES.includes(body.status as any)) {
+      return c.json(
+        { error: `status must be one of ${STATUSES.join(", ")}` },
+        400,
+      );
+    }
+    const rows = await sql<Array<{ id: string; status: string }>>`
+      UPDATE incidents
+         SET status = ${body.status},
+             acknowledged_at = CASE WHEN ${body.status} = 'acknowledged'
+                                    THEN now() ELSE acknowledged_at END,
+             closed_at = CASE WHEN ${body.status} = 'closed' AND closed_at IS NULL
+                              THEN now() ELSE closed_at END
+       WHERE id = ${id}::uuid
+       RETURNING id, status
+    `;
+    if (rows.length === 0) return c.json({ error: "not found" }, 404);
+    return c.json({ ok: true, incident: rows[0] });
   });
 
   app.get("/:id/playback", async (c) => {

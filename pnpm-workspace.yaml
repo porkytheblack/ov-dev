@@ -5,6 +5,7 @@ packages:
   - "services/ov-whatsapp"
   - "services/ov-telegram"
   - "services/ov-agent"
+  - "services/ov-station"
   - "services/ov-api"
   - "services/ov-stream-gateway"
   - "services/ov-dashboard"

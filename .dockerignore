@@ -1,0 +1,25 @@
+# Never ship host-resolved node_modules into images — the in-image
+# `pnpm install` resolves correct (container) symlinks. Copying host
+# node_modules produces dangling pnpm symlinks (peer-dep hash mismatch)
+# and breaks module resolution at runtime.
+**/node_modules
+
+# Build artifacts / caches — regenerated in-image, must not leak from host.
+**/dist
+**/.next
+**/.turbo
+**/*.tsbuildinfo
+
+# VCS + local
+.git
+.gitignore
+
+# Secrets / local env — services read these via compose env_file at runtime,
+# never at build time. Keep them out of the build context.
+.env
+.env.*
+!.env.example
+
+# Editor / OS noise
+**/.DS_Store
+**/*.log
