@@ -5,9 +5,9 @@ import { Wordmark } from "./Wordmark";
 
 const links = [
   { href: "#how", label: "How it works" },
-  { href: "#showcase", label: "In action" },
+  { href: "#showcase", label: "Showcase" },
   { href: "#features", label: "Features" },
-  { href: "#privacy", label: "Self-hosted" },
+  { href: "#trust", label: "Trust" },
 ];
 
 export function Nav() {
@@ -25,7 +25,7 @@ export function Nav() {
     <header
       className={`fixed inset-x-0 top-0 z-50 transition-colors duration-200 ${
         scrolled
-          ? "border-b border-border bg-bg/85 backdrop-blur-md"
+          ? "border-b border-border bg-white/85 backdrop-blur-md"
           : "border-b border-transparent"
       }`}
     >
@@ -44,12 +44,9 @@ export function Nav() {
             </a>
           ))}
         </div>
-        <div className="hidden items-center gap-3 md:flex">
-          <a href="#get-started" className="btn-ghost">
-            Docs
-          </a>
-          <a href="#get-started" className="btn-primary">
-            Get started
+        <div className="hidden md:flex">
+          <a href="#waitlist" className="btn-primary">
+            Join the waitlist
           </a>
         </div>
         <button
@@ -68,7 +65,7 @@ export function Nav() {
         </button>
       </nav>
       {open && (
-        <div className="border-t border-border bg-bg px-5 py-4 md:hidden">
+        <div className="border-t border-border bg-white px-5 py-4 md:hidden">
           <div className="flex flex-col gap-4">
             {links.map((l) => (
               <a
@@ -81,11 +78,11 @@ export function Nav() {
               </a>
             ))}
             <a
-              href="#get-started"
+              href="#waitlist"
               onClick={() => setOpen(false)}
               className="btn-primary mt-1"
             >
-              Get started
+              Join the waitlist
             </a>
           </div>
         </div>

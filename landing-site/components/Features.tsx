@@ -41,8 +41,7 @@ const I = {
   shield: ({ className }) => (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
       <path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6l-7-3Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-      <circle cx="12" cy="11" r="2.2" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M12 13.2V16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M9 12l2.2 2.2L15.5 10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
   clock: ({ className }) => (
@@ -56,58 +55,56 @@ const I = {
 const features = [
   {
     icon: I.scan,
-    t: "Real-time AI detection",
-    d: "YOLO11 vision over 80+ object classes, with BoT-SORT tracking so the same object keeps its identity across frames.",
+    t: "Real-time AI vision",
+    d: "Detects and tracks 80+ object classes across frames as it happens.",
   },
   {
     icon: I.zone,
     t: "Zones & schedules",
-    d: "Draw ROIs per camera, pick the classes that matter, and set time windows — night-only, weekends, whatever fits the site.",
+    d: "Draw regions of interest and set time windows like night-only.",
   },
   {
     icon: I.pulse,
-    t: "Smart incident lifecycle",
-    d: "A linger threshold means a passing shadow is ignored but a real loiterer opens an incident. Things that leave early are suppressed, not spammed.",
+    t: "Smart incident logic",
+    d: "A linger threshold filters noise, so there's no false-alarm spam.",
   },
   {
     icon: I.clip,
     t: "Overlay clips & posters",
-    d: "Every incident gets an MP4 with bounding boxes composited in, plus a poster — playable in any browser, no plugin.",
+    d: "Every incident ships with bounding boxes and a poster frame.",
   },
   {
     icon: I.chat,
     t: "Conversational agent",
-    d: "Ask “what happened overnight?” and get a factual answer pulled from real incident data — never invented.",
+    d: "Ask questions in plain language, get answers from real data.",
   },
   {
     icon: I.send,
     t: "WhatsApp & Telegram",
-    d: "Signed deep links to playback, inline acknowledge buttons, per-subscriber camera filters. The channels you already check.",
+    d: "Delivered where you already are, with inline acknowledge.",
   },
   {
     icon: I.shield,
-    t: "Self-hosted & private",
-    d: "Runs on your own hardware via Docker. Footage and detections never leave your network. No vendor cloud, no lock-in.",
+    t: "Private by default",
+    d: "Your footage stays private. Never sold, never mined.",
   },
   {
     icon: I.clock,
     t: "Smart retention",
-    d: "Keep incident clips for months, prune routine footage in days. Policies run on schedule so storage never runs away.",
+    d: "Incidents kept long, routine footage pruned automatically.",
   },
 ];
 
 export function Features() {
   return (
-    <section id="features" className="border-y border-border bg-surface/30">
+    <section id="features" className="border-y border-border bg-surface-elev/60">
       <div className="container-ov py-24 lg:py-28">
         <Reveal>
           <div className="max-w-2xl">
             <span className="eyebrow">Capabilities</span>
-            <h2 className="section-title mt-4">
-              Everything a guard should do — automated
-            </h2>
+            <h2 className="section-title mt-4">Built to watch, not record.</h2>
             <p className="lead mt-5">
-              Built end to end for self-hosted compounds. No add-ons, no tiers.
+              Everything operating in real time, across every connected camera.
             </p>
           </div>
         </Reveal>
@@ -115,8 +112,8 @@ export function Features() {
         <div className="mt-14 grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
           {features.map((f, i) => (
             <Reveal key={f.t} delay={(i % 4) * 60}>
-              <div className="group h-full bg-bg p-7 transition-colors duration-150 hover:bg-surface">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-surface text-accent transition-colors duration-150 group-hover:border-accent/40">
+              <div className="group h-full bg-bg p-7 transition-colors duration-150 hover:bg-surface-elev">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-surface-elev text-accent transition-colors duration-150 group-hover:border-[color:var(--accent-line)]">
                   <f.icon className="h-[22px] w-[22px]" />
                 </div>
                 <h3 className="mt-5 text-[1.05rem] font-medium">{f.t}</h3>

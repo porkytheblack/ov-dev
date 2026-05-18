@@ -14,23 +14,26 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-mono",
 });
 
-const title = "Overwatch — Meet your new security guard";
+const title = "Overwatch — AI Surveillance That Messages You";
 const description =
-  "Always watching, always ready to keep you safe. Overwatch turns the cameras you already have into an AI security guard that spots trouble and messages you on WhatsApp or Telegram the moment it matters.";
+  "Multi-camera AI surveillance. Connects to your cameras, watches the zones that matter, and messages you on WhatsApp or Telegram when it counts.";
 
 export const metadata: Metadata = {
   title,
   description,
-  metadataBase: new URL("https://overwatch.example.com"),
+  metadataBase: new URL("https://overwatch.app"),
+  applicationName: "Overwatch",
   keywords: [
     "AI surveillance",
-    "security camera AI",
-    "self-hosted CCTV",
+    "multi-camera security",
+    "real-time object detection",
+    "security camera alerts",
     "WhatsApp security alerts",
-    "Telegram security alerts",
-    "incident detection",
-    "Overwatch",
+    "Telegram camera notifications",
+    "conversational security agent",
+    "intrusion detection",
   ],
+  authors: [{ name: "Cradle Labs Limited" }],
   openGraph: {
     title,
     description,
@@ -45,7 +48,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0a0c10",
+  themeColor: "#ffffff",
   width: "device-width",
   initialScale: 1,
 };

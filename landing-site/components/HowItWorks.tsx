@@ -4,38 +4,36 @@ import { CameraFeed } from "./mocks/CameraFeed";
 const steps = [
   {
     n: "01",
-    t: "Connect your cameras",
-    d: "Point Overwatch at any RTSP or ONVIF camera you already own. One process handles many cameras at once. No new hardware.",
+    t: "Watch",
+    d: "Overwatch reads your camera feeds live and tracks objects across frames in real time.",
   },
   {
     n: "02",
-    t: "Draw the zones that matter",
-    d: "Outline a driveway, a gate, a perimeter. Pick what to watch for — person, vehicle, fire — and when. Night-only? Weekends? Your rules.",
+    t: "Detect",
+    d: "AI vision identifies 80+ object classes inside the zones and time windows you care about.",
   },
   {
     n: "03",
-    t: "Overwatch watches every frame",
-    d: "Real-time AI runs on your hardware, 24/7. It tracks objects across frames and only opens an incident when something genuinely lingers where it shouldn't.",
+    t: "Decide",
+    d: "Smart logic separates a real event from a passing shadow before anything fires.",
   },
   {
     n: "04",
-    t: "You get the message",
-    d: "A WhatsApp or Telegram alert with a clip, boxes drawn, and a summary. Acknowledge from chat — or just ask it what happened.",
+    t: "Notify",
+    d: "A confirmed incident becomes a clip, a poster and a plain-language message on your phone.",
   },
 ];
 
 export function HowItWorks() {
   return (
-    <section id="how" className="border-y border-border bg-surface/30">
+    <section id="how" className="border-y border-border bg-surface-elev/60">
       <div className="container-ov py-24 lg:py-28">
         <Reveal>
           <div className="max-w-2xl">
-            <span className="eyebrow">How it works</span>
-            <h2 className="section-title mt-4">
-              From camera to alert in four steps
-            </h2>
+            <span className="eyebrow">The model</span>
+            <h2 className="section-title mt-4">Watch. Detect. Decide. Notify.</h2>
             <p className="lead mt-5">
-              Set it up once. It stands watch from then on.
+              Four stages, running continuously across every camera.
             </p>
           </div>
         </Reveal>
@@ -70,7 +68,7 @@ export function HowItWorks() {
               />
               <div className="flex items-center justify-between px-1 pt-3">
                 <span className="mono text-[11px] uppercase tracking-[0.1em] text-text-dim">
-                  ROI matched · tracking 2 objects
+                  Zone matched · tracking 2 objects
                 </span>
                 <span className="pill border-accent text-accent">
                   <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent animate-blink" />

@@ -6,16 +6,16 @@ export function Problem() {
       <div className="grid gap-14 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
         <Reveal>
           <div className="lg:sticky lg:top-24">
-            <span className="eyebrow">The problem</span>
+            <span className="eyebrow">The status quo</span>
             <h2 className="section-title mt-4">
               Cameras record.
               <br />
               They don&apos;t watch.
             </h2>
             <p className="lead mt-5 max-w-[30rem]">
-              Footage is only useful after something has already happened — once
-              you know to go looking for it. Nobody can stare at a wall of feeds
-              all night. The moment that mattered is buried in hours of nothing.
+              Most systems capture everything and understand nothing. The
+              footage only matters after something has already happened — and
+              you&apos;re the one scrubbing through hours of it.
             </p>
           </div>
         </Reveal>
@@ -23,24 +23,24 @@ export function Problem() {
         <div className="grid gap-4 sm:grid-cols-2">
           {[
             {
-              k: "Before",
+              k: "The old way",
               t: "Passive recording",
               items: [
-                "You find out hours later, by scrubbing tape",
-                "Motion alerts cry wolf on every shadow and cat",
-                "No idea what actually happened without watching",
-                "Footage locked to one vendor's cloud and app",
+                "Endless motion pings from wind, rain and headlights",
+                "You review footage after the fact, never before",
+                "Hours of recording, no idea what's in it",
+                "A wall of feeds no one is actually watching",
               ],
-              tone: "danger",
+              tone: "muted",
             },
             {
               k: "With Overwatch",
               t: "An AI guard on duty",
               items: [
-                "Messaged the instant a real incident starts",
-                "Only the zones and objects you care about",
-                "A clip with boxes drawn — and a plain-language summary",
-                "Self-hosted: your footage stays on your network",
+                "Alerts only when something genuinely lingers",
+                "You're told what happened, in plain language",
+                "Incidents kept long, routine footage pruned",
+                "Ask it anything and get answers from real data",
               ],
               tone: "accent",
             },
@@ -49,7 +49,7 @@ export function Problem() {
               <div
                 className={`card h-full p-6 ${
                   col.tone === "accent"
-                    ? "border-accent/40 bg-accent-soft/20"
+                    ? "border-[color:var(--accent-line)] bg-[color:var(--accent-soft)]"
                     : ""
                 }`}
               >

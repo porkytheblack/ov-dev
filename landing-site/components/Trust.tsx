@@ -1,36 +1,35 @@
 import { Reveal } from "./Reveal";
 
 const facts = [
-  { k: "Runs on", v: "Your hardware" },
-  { k: "Footage leaves network", v: "Never" },
-  { k: "Vendor cloud", v: "None" },
-  { k: "Monthly fee", v: "$0" },
+  { k: "Footage sold or mined", v: "Never" },
+  { k: "Answers from real data", v: "100%" },
+  { k: "Invented events", v: "Zero" },
+  { k: "Zones you control", v: "Always" },
 ];
 
-export function Privacy() {
+const chips = [
+  "Private by default",
+  "Factual answers only",
+  "Fewer false alarms",
+  "You stay in control",
+];
+
+export function Trust() {
   return (
-    <section id="privacy" className="border-y border-border bg-surface/30">
+    <section id="trust" className="border-y border-border bg-surface-elev/60">
       <div className="container-ov py-24 lg:py-28">
         <div className="grid gap-14 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
           <Reveal>
             <div>
-              <span className="eyebrow">Self-hosted by design</span>
-              <h2 className="section-title mt-4">
-                Your footage stays yours
-              </h2>
+              <span className="eyebrow">Why you can trust it</span>
+              <h2 className="section-title mt-4">Private by default.</h2>
               <p className="lead mt-5 max-w-[34rem]">
-                A security guard you don&apos;t have to trust a third party
-                with. Overwatch is a single Docker stack you run on your own
-                box. Cameras, detections, clips, the AI agent — all of it stays
-                inside your network. No vendor account, no upload, no lock-in.
+                Overwatch is built to earn trust: your footage stays private,
+                answers come only from real data, and you stay in control of
+                what&apos;s watched and when.
               </p>
               <div className="mt-8 flex flex-wrap gap-2">
-                {[
-                  "Docker compose up",
-                  "Postgres · Redis · object storage",
-                  "Bring your own LLM key",
-                  "Open architecture",
-                ].map((t) => (
+                {chips.map((t) => (
                   <span
                     key={t}
                     className="mono inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface px-3.5 py-2 text-[12px] text-text-muted"

@@ -4,7 +4,7 @@ import { CameraFeed } from "./mocks/CameraFeed";
 
 function BrowserChrome({ children }: { children: React.ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-elev">
+    <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-[0_24px_60px_-24px_rgba(20,20,20,0.22)]">
       <div className="flex items-center gap-2 border-b border-border bg-surface-elev px-4 py-3">
         <span className="h-3 w-3 rounded-full bg-[#ff5f57]" />
         <span className="h-3 w-3 rounded-full bg-[#febc2e]" />
@@ -15,7 +15,7 @@ function BrowserChrome({ children }: { children: React.ReactNode }) {
             <path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="2" />
           </svg>
           <span className="mono text-[11px] text-text-dim">
-            overwatch.local/cameras
+            overwatch.app/cameras
           </span>
         </div>
         <span className="w-12" />
@@ -38,21 +38,18 @@ export function LiveView() {
       <div className="grid gap-14 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
         <Reveal>
           <div>
-            <span className="eyebrow">The dashboard</span>
-            <h2 className="section-title mt-4">
-              The whole compound, one screen
-            </h2>
+            <span className="eyebrow">Command view</span>
+            <h2 className="section-title mt-4">Every camera, one screen.</h2>
             <p className="lead mt-5 max-w-[30rem]">
-              When you want the full picture, the dashboard puts every camera in
-              a live grid with detection boxes drawn over the video in real
-              time. Open incidents float to the top. Built for a wall display
-              that runs all night.
+              When you want the full picture, the web dashboard puts every feed
+              and every incident in one place — but you&apos;ll rarely need to
+              open it.
             </p>
             <ul className="mt-7 space-y-3">
               {[
-                "WebRTC live view, boxes overlaid client-side",
-                "Open incidents first, with one-click acknowledge",
-                "Calendar of history — every clip kept by your retention rules",
+                "Live multi-camera grid, all feeds at a glance",
+                "Incident history and calendar, fully searchable",
+                "Acknowledge and close incidents in one click",
               ].map((p) => (
                 <li
                   key={p}
@@ -80,7 +77,7 @@ export function LiveView() {
                 <span className="inline-block h-1.5 w-1.5 bg-accent animate-pulse-mark" />
               </span>
               <span className="mono text-[11px] text-text-dim">
-                4 cameras · 1 incident open · 02:15:—
+                4 cameras · 1 incident open · 02:15
               </span>
             </div>
 
@@ -96,9 +93,7 @@ export function LiveView() {
                 <span className="mono text-[11px] uppercase tracking-[0.1em] text-text-dim">
                   Recent incidents
                 </span>
-                <span className="mono text-[11px] text-text-dim">
-                  last 24h
-                </span>
+                <span className="mono text-[11px] text-text-dim">last 24h</span>
               </div>
               <div className="px-2 pb-3">
                 {incidents.map((r) => (
@@ -112,11 +107,16 @@ export function LiveView() {
                     <span
                       className={`pill ${
                         r.st === "OPEN"
-                          ? "border-accent bg-accent text-[color:var(--on-accent)] font-semibold"
+                          ? "border-transparent text-[color:var(--on-accent)] font-semibold"
                           : r.st === "ACK'D"
                             ? "border-success text-success"
                             : "border-border-strong text-text-dim"
                       }`}
+                      style={
+                        r.st === "OPEN"
+                          ? { background: "var(--accent-fill)" }
+                          : undefined
+                      }
                     >
                       {r.st}
                     </span>
