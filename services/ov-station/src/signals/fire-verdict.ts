@@ -1,0 +1,124 @@
+/**
+ * Root of the fire-adjudication broadcast. Pulls the retained suspect frame
+ * out of MinIO, hands it to the Mimo vision model as a base64 data URI, and
+ * resolves a strict fire / false-alarm / undetermined verdict.
+ *
+ * FAIL-OPEN by construction: this signal must never throw and never leave
+ * the decision blank. Anything that prevents a real verdict (no retained
+ * frame, MinIO miss, model down/timeout, refusal) resolves to
+ * `"undetermined"`, which the broadcast treats as "alert anyway" — a real
+ * fire is never dropped because the second opinion was unavailable. Only an
+ * explicit model `false_alarm` suppresses the alert.
+ */
+import { signal, z } from "station-signal";
+import { BUCKETS, makeMinio } from "@overwatch/shared-ts";
+import { classifyFireWithMimo, mimoConfigured } from "@overwatch/ai";
+import { sql, log } from "../config.js";
+
+const Input = z.object({
+  camera_id: z.string(),
+  classes: z.array(z.string()),
+  frame_key: z.string().optional(),
+  confidence: z.number(),
+  high_confidence: z.boolean(),
+});
+
+const Output = z.object({
+  camera_id: z.string(),
+  classes: z.array(z.string()),
+  frame_key: z.string().optional(),
+  decision: z.enum(["fire", "false_alarm", "undetermined"]),
+  reason: z.string(),
+});
+
+async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const c of stream) {
+    chunks.push(typeof c === "string" ? Buffer.from(c) : (c as Buffer));
+  }
+  return Buffer.concat(chunks);
+}
+
+export const fireVerdict = signal("fire-verdict")
+  .input(Input)
+  .output(Output)
+  .timeout(60_000)
+  .retries(0)
+  .run(async (input) => {
+    const base = {
+      camera_id: input.camera_id,
+      classes: input.classes,
+      frame_key: input.frame_key,
+    };
+    try {
+      // Defensive: the engine only sends sub-threshold fire here, but if a
+      // high-confidence one ever arrives, confirm without a model round-trip.
+      if (input.high_confidence) {
+        return { ...base, decision: "fire" as const, reason: "high confidence" };
+      }
+      if (!input.frame_key) {
+        return {
+          ...base,
+          decision: "undetermined" as const,
+          reason: "no frame retained",
+        };
+      }
+      if (!mimoConfigured("vision")) {
+        return {
+          ...base,
+          decision: "undetermined" as const,
+          reason: "mimo vision not configured",
+        };
+      }
+
+      let dataUri: string;
+      try {
+        const minio = makeMinio();
+        const obj = await minio.getObject(BUCKETS.frames, input.frame_key);
+        const buf = await streamToBuffer(obj);
+        if (buf.length === 0) throw new Error("empty frame");
+        dataUri = `data:image/jpeg;base64,${buf.toString("base64")}`;
+      } catch (e) {
+        log.warn(
+          { err: e, camera_id: input.camera_id, frame_key: input.frame_key },
+          "fire frame fetch failed; fail-open",
+        );
+        return {
+          ...base,
+          decision: "undetermined" as const,
+          reason: "frame unavailable",
+        };
+      }
+
+      const cam = await sql<Array<{ name: string }>>`
+        SELECT name FROM cameras WHERE id = ${input.camera_id}::uuid LIMIT 1
+      `;
+      const cameraName = cam[0]?.name ?? "the camera";
+
+      const res = await classifyFireWithMimo({
+        imageUrl: dataUri,
+        cameraName,
+        classes: input.classes,
+        detectorConfidence: input.confidence,
+      });
+      log.info(
+        {
+          camera_id: input.camera_id,
+          verdict: res.verdict,
+          reason: res.reason,
+          detectorConfidence: input.confidence,
+        },
+        "fire verdict resolved",
+      );
+      return { ...base, decision: res.verdict, reason: res.reason };
+    } catch (e) {
+      // Absolutely never throw out of the broadcast root — that would skip
+      // the alert node and silently drop a possible fire.
+      log.error({ err: e, camera_id: input.camera_id }, "fire-verdict crashed; fail-open");
+      return {
+        ...base,
+        decision: "undetermined" as const,
+        reason: "verdict error",
+      };
+    }
+  });

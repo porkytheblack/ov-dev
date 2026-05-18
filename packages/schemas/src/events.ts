@@ -33,6 +33,11 @@ export const FrameDetections = z.object({
   ts: z.string().datetime({ offset: true }),
   frame_id: z.string(),
   detections: z.array(Detection),
+  // Set only when this frame carried a fire/smoke detection: the detector
+  // keeps that frame in MinIO (instead of its usual delete) and threads the
+  // object key here so the fire-adjudication pipeline can show it to the
+  // vision model. Absent on ordinary frames.
+  frame_key: z.string().optional(),
 });
 export type FrameDetections = z.infer<typeof FrameDetections>;
 
@@ -87,6 +92,24 @@ export const SummaryReady = z.object({
 });
 export type SummaryReady = z.infer<typeof SummaryReady>;
 
+// Engine → ov-station bridge: a sustained fire/smoke detection whose
+// confidence fell BELOW the high-confidence bar, so it must be adjudicated
+// by the vision model before (or instead of) alerting. High-confidence fire
+// is dispatched engine-direct and never produces this event.
+export const FireReview = z.object({
+  type: z.literal("fire.review"),
+  camera_id: z.string().uuid(),
+  classes: z.array(z.string()),
+  // MinIO key of the retained triggering frame. Optional: if the frame was
+  // already reclaimed (lifecycle) or never retained, the adjudicator
+  // fail-opens (alerts) rather than silently dropping a possible fire.
+  frame_key: z.string().optional(),
+  confidence: z.number().min(0).max(1),
+  high_confidence: z.boolean(),
+  ts: z.string().datetime({ offset: true }),
+});
+export type FireReview = z.infer<typeof FireReview>;
+
 export const CameraStatusChanged = z.object({
   type: z.literal("camera.status_changed"),
   camera_id: z.string().uuid(),
@@ -134,6 +157,7 @@ export const STREAMS = {
   incidents: "incidents",
   clips: "clips",
   summaries: "summaries",
+  fire_review: "fire_review",
   camera_status: "camera_status",
   bot_outbox: (channel: "whatsapp" | "telegram") => `bot_outbox.${channel}`,
 } as const;
