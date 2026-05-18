@@ -58,7 +58,7 @@ export const rois = pgTable("rois", {
   classesOfInterest: text("classes_of_interest").array().notNull(),
   matchMode: text("match_mode").notNull().default("centroid"),
   detectionWindow: jsonb("detection_window").notNull().default(sql`'{"type":"always"}'::jsonb`),
-  lingerThresholdSeconds: integer("linger_threshold_seconds").notNull().default(60),
+  lingerThresholdSeconds: integer("linger_threshold_seconds").notNull().default(3),
   notifyEnabled: boolean("notify_enabled").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

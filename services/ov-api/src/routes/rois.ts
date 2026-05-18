@@ -26,23 +26,33 @@ const roiInput = z.object({
   name: z.string().min(1),
   description: z.string().default(""),
   polygon: polygonSchema,
-  classes_of_interest: z.array(z.string()).min(1),
+  // Exclusion zones have no classes/window, so no longer hard-min(1);
+  // the POST handler still requires ≥1 class for `include` zones.
+  classes_of_interest: z.array(z.string()).default([]),
   match_mode: z.enum(["centroid", "iou"]).default("centroid"),
   detection_window: detectionWindow.optional(),
   linger_threshold_seconds: z.number().int().min(0).max(3600).default(60),
   notify_enabled: z.boolean().default(true),
+  kind: z.enum(["include", "exclude"]).default("include"),
 });
 
 export function makeRoiRoutes(sql: ReturnType<typeof postgres>) {
   const cameraScoped = new Hono();
   const root = new Hono();
 
+  // Idempotent: ensure the exclusion-zone column exists on already-migrated
+  // databases (init.sql covers fresh ones). The engine's RoiCache also
+  // ensures it, so whichever boots first wins and the other no-ops.
+  void sql`ALTER TABLE rois ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'include'`.catch(
+    () => {},
+  );
+
   cameraScoped.get("/", async (c) => {
     const cameraId = c.req.param("id") as string;
     const rows = await sql<any[]>`
       SELECT id, camera_id, name, description, polygon, classes_of_interest,
              match_mode, detection_window, linger_threshold_seconds,
-             notify_enabled, created_at
+             notify_enabled, kind, created_at
         FROM rois WHERE camera_id = ${cameraId}::uuid ORDER BY created_at
     `;
     return c.json({ rois: rows });
@@ -51,11 +61,14 @@ export function makeRoiRoutes(sql: ReturnType<typeof postgres>) {
   cameraScoped.post("/", zValidator("json", roiInput), async (c) => {
     const cameraId = c.req.param("id") as string;
     const b = c.req.valid("json");
+    if (b.kind !== "exclude" && b.classes_of_interest.length === 0) {
+      return c.json({ error: "an include zone needs at least one class" }, 400);
+    }
     const id = uuid();
     await sql`
       INSERT INTO rois
         (id, camera_id, name, description, polygon, classes_of_interest,
-         match_mode, detection_window, linger_threshold_seconds, notify_enabled)
+         match_mode, detection_window, linger_threshold_seconds, notify_enabled, kind)
       VALUES (
         ${id}, ${cameraId}::uuid, ${b.name}, ${b.description ?? ""},
         ${JSON.stringify(b.polygon)}::jsonb,
@@ -63,7 +76,8 @@ export function makeRoiRoutes(sql: ReturnType<typeof postgres>) {
         ${b.match_mode},
         ${JSON.stringify(b.detection_window ?? { type: "always" })}::jsonb,
         ${b.linger_threshold_seconds},
-        ${b.notify_enabled}
+        ${b.notify_enabled},
+        ${b.kind}
       )
     `;
     return c.json({ id });
@@ -80,6 +94,7 @@ export function makeRoiRoutes(sql: ReturnType<typeof postgres>) {
     const detWindow = b.detection_window !== undefined ? JSON.stringify(b.detection_window) : null;
     const linger = b.linger_threshold_seconds ?? null;
     const notify = b.notify_enabled ?? null;
+    const kind = b.kind ?? null;
     const rows = await sql<any[]>`
       UPDATE rois
          SET name                     = COALESCE(${name}, name),
@@ -89,7 +104,8 @@ export function makeRoiRoutes(sql: ReturnType<typeof postgres>) {
              match_mode               = COALESCE(${matchMode}, match_mode),
              detection_window         = COALESCE(${detWindow}::jsonb, detection_window),
              linger_threshold_seconds = COALESCE(${linger}, linger_threshold_seconds),
-             notify_enabled           = COALESCE(${notify}, notify_enabled)
+             notify_enabled           = COALESCE(${notify}, notify_enabled),
+             kind                     = COALESCE(${kind}, kind)
        WHERE id = ${id}::uuid
        RETURNING *
     `;

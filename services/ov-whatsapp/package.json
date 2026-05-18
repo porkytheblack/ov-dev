@@ -15,6 +15,7 @@
     "@overwatch/shared-ts": "workspace:*",
     "hono": "^4.4.3",
     "ioredis": "^5.4.1",
+    "postgres": "^3.4.4",
     "zod": "^3.23.5"
   },
   "devDependencies": {

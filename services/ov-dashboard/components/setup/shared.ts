@@ -25,6 +25,7 @@ export interface Roi {
   detection_window: DetectionWindow | null;
   linger_threshold_seconds: number;
   notify_enabled: boolean;
+  kind?: "include" | "exclude";
   created_at: string;
 }
 
@@ -44,6 +45,7 @@ export interface Camera {
 export interface RoiDraft {
   name: string;
   description: string;
+  kind: "include" | "exclude";
   polygon: Pt[] | null;
   classes_of_interest: string[];
   match_mode: "centroid" | "iou";
@@ -189,6 +191,7 @@ export function freshDraft(zoneNumber: number): RoiDraft {
   return {
     name: `Zone ${zoneNumber}`,
     description: "",
+    kind: "include",
     polygon: null,
     classes_of_interest: ["person"],
     match_mode: "centroid",
@@ -210,6 +213,7 @@ export function draftFromRoi(r: Roi): RoiDraft {
   return {
     name: r.name,
     description: r.description ?? "",
+    kind: r.kind === "exclude" ? "exclude" : "include",
     polygon: poly.length >= 3 ? poly : null,
     classes_of_interest: [...(r.classes_of_interest ?? [])],
     match_mode: r.match_mode === "iou" ? "iou" : "centroid",
@@ -228,6 +232,7 @@ function draftKey(d: RoiDraft): string {
   return JSON.stringify({
     name: d.name,
     description: d.description,
+    kind: d.kind,
     polygon: d.polygon,
     classes: [...d.classes_of_interest].sort(),
     match_mode: d.match_mode,
@@ -259,7 +264,9 @@ export function validateDraft(d: RoiDraft): string | null {
   if (!d.name.trim()) return "Give the zone a name.";
   if (!d.polygon || d.polygon.length < 3)
     return "Draw a region: drag a box on the snapshot.";
-  if (d.classes_of_interest.length === 0)
+  // Exclusion zones ignore everything inside them — classes/window/linger
+  // don't apply.
+  if (d.kind !== "exclude" && d.classes_of_interest.length === 0)
     return "Pick at least one class of interest.";
   if (
     !Number.isFinite(d.linger_threshold_seconds) ||
@@ -277,8 +284,11 @@ export function roiPayload(d: RoiDraft) {
   return {
     name: d.name.trim(),
     description: d.description,
+    kind: d.kind,
     polygon: d.polygon ?? [],
-    classes_of_interest: d.classes_of_interest,
+    // Exclusion zones ignore everything inside them regardless of class.
+    classes_of_interest:
+      d.kind === "exclude" ? [] : d.classes_of_interest,
     match_mode: d.match_mode,
     linger_threshold_seconds: d.linger_threshold_seconds,
     notify_enabled: d.notify_enabled,

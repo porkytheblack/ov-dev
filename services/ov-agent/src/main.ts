@@ -1,171 +1,115 @@
 /**
- * Conversational agent over HTTP. Exposes:
+ * Overwatch conversational agent — a Glove runtime exposed over HTTP.
+ *
  *   POST /chat   { channel, handle, message, message_id? } → { response }
  *   GET  /health
  *
- * Uses Anthropic's Messages API directly with tool calling. We keep
- * the Glove-style tool registry separately (`./tools.ts`) so the same
- * surface could be lifted into a Glove runtime without rewriting handlers.
+ * Each inbound message builds a Glove instance bound to a Postgres-backed
+ * conversation store keyed by (channel, handle), so WhatsApp / Telegram
+ * users keep context. The model is the configurable Mimo chat model
+ * (`@overwatch/ai`) — drop a base URL + key + model name in `.env`.
+ *
+ * The bot services proxy here unchanged; only the engine behind /chat
+ * moved from a hand-rolled Anthropic loop to the Glove agent loop.
  */
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { makeLogger } from "@overwatch/shared-ts";
+import { Glove, type Message, type ModelPromptResult } from "glove-core";
+import { Displaymanager } from "glove-core/display-manager";
+import { makeMimoChatModel, mimoConfigured } from "@overwatch/ai";
+import { makeLogger, makeRedis } from "@overwatch/shared-ts";
 import postgres from "postgres";
-import { ConversationStore, type StoredMessage } from "./store.js";
-import { buildToolset } from "./tools.js";
+import { PgConversationStore } from "./glove-store.js";
+import { buildToolset, OV_TIMEZONE, tzNow } from "./tools.js";
 import { zodToJsonSchema } from "./zod-json.js";
 
 const log = makeLogger("ov-agent");
-const MODEL = process.env.MODEL ?? "claude-sonnet-4-5";
-const API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
-const MAX_TOOL_TURNS = 6;
 
 const sql = postgres(
   process.env.DATABASE_URL ?? "postgres://overwatch:overwatch@postgres:5432/overwatch",
   { max: 4 },
 );
-const tools = buildToolset({ sql });
-const toolByName = new Map(tools.map((t) => [t.name, t]));
-const store = new ConversationStore(sql);
+const redis = makeRedis();
+const DASHBOARD_BASE_URL = process.env.DASHBOARD_BASE_URL ?? "http://localhost:9090";
+const INTERNAL_API_URL = process.env.INTERNAL_API_URL ?? "http://ov-api:3001";
 
 function systemPrompt(channel: string): string {
   return [
     "You are the Overwatch agent for a self-hosted multi-camera AI surveillance system.",
     "You answer questions about cameras, incidents, and compound status concisely and factually.",
-    "Use tools to look up data — never make up incident details.",
-    `Time references like "last hour" or "today" should be resolved against the current time: ${new Date().toISOString()}.`,
+    "Use the provided tools to look up data — never invent incident details, camera names, or timestamps.",
+    `The operator's timezone is ${OV_TIMEZONE}. The current local time is ${tzNow().local} (${OV_TIMEZONE}).`,
+    `Always reason about and report times in ${OV_TIMEZONE}. Resolve relative references ("last hour", "today", "this morning") in that timezone; call get_current_time if unsure.`,
     `The user is reaching you via ${channel}.`,
-    "Keep responses tight — under 1000 characters when possible. Use plain text, not Markdown formatting.",
-  ].join(" ");
+    channel === "telegram" || channel === "whatsapp"
+      ? "When the user asks to see/send a clip or video, you MUST call send_incident_clips every time — never claim a clip was sent without calling it this turn, even if you sent one earlier (the user may not have received it). Only say it was sent after the tool returns sent>=1."
+      : "",
+    "Keep responses tight — under 1000 characters when possible. Plain text only, no Markdown.",
+  ].filter(Boolean).join(" ");
 }
 
-type AnthropicContentBlock =
-  | { type: "text"; text: string }
-  | { type: "tool_use"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; tool_use_id: string; content: string };
+const COMPACTION_INSTRUCTIONS =
+  "Summarize the prior conversation about cameras, incidents, and compound " +
+  "status. Preserve incident IDs, camera names, ROI names, timestamps, and " +
+  "any acknowledgements the operator made.";
 
-type AnthropicMessage = {
-  role: "user" | "assistant";
-  content: string | AnthropicContentBlock[];
-};
-
-function toolDefinitions() {
-  return tools.map((t) => ({
-    name: t.name,
-    description: t.description,
-    input_schema: zodToJsonSchema(t.inputSchema),
-  }));
-}
-
-async function callAnthropic(messages: AnthropicMessage[], channel: string) {
-  if (!API_KEY) throw new Error("ANTHROPIC_API_KEY missing");
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 1024,
-      system: systemPrompt(channel),
-      tools: toolDefinitions(),
-      messages,
-    }),
-  });
-  if (!r.ok) {
-    const body = await r.text();
-    throw new Error(`anthropic ${r.status}: ${body}`);
+function extractResponse(result: Message | ModelPromptResult): string {
+  if ("sender" in result) {
+    return result.text?.trim() || "(no response)";
   }
-  return (await r.json()) as {
-    id: string;
-    role: "assistant";
-    stop_reason: string;
-    content: AnthropicContentBlock[];
-  };
-}
-
-function storedToAnthropic(stored: StoredMessage[]): AnthropicMessage[] {
-  // Each stored message has role + content; tool blocks are flattened into text for safety
-  // when the model can't see prior tool_use/tool_result pairs. We keep this lossy on purpose.
-  return stored.map((m) => ({
-    role: m.role === "assistant" ? "assistant" : "user",
-    content: m.role === "tool" ? `[tool ${m.name}: ${m.content}]` : m.content,
-  }));
+  const agentMsg = [...result.messages]
+    .reverse()
+    .find((m) => m.sender === "agent" && (m.text ?? "").trim() !== "");
+  return agentMsg?.text?.trim() || "(no response)";
 }
 
 async function chat(channel: string, handle: string, message: string): Promise<string> {
-  const prior = await store.load(channel, handle);
-  const messages: AnthropicMessage[] = [
-    ...storedToAnthropic(prior),
-    { role: "user", content: message },
-  ];
+  const store = new PgConversationStore(sql, channel, handle);
+  const tools = buildToolset({
+    sql,
+    channel,
+    handle,
+    redis,
+    dashboardBaseUrl: DASHBOARD_BASE_URL,
+    internalApiUrl: INTERNAL_API_URL,
+  });
+  const glove = new Glove({
+    store,
+    model: makeMimoChatModel(),
+    displayManager: new Displaymanager(),
+    systemPrompt: systemPrompt(channel),
+    serverMode: true,
+    compaction_config: {
+      compaction_instructions: COMPACTION_INSTRUCTIONS,
+      max_turns: 12,
+    },
+  });
 
-  let finalText = "";
-  const additions: StoredMessage[] = [
-    { role: "user", content: message, ts: new Date().toISOString() },
-  ];
-
-  for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
-    const reply = await callAnthropic(messages, channel);
-    const assistantBlocks: AnthropicContentBlock[] = reply.content;
-    messages.push({ role: "assistant", content: assistantBlocks });
-    const textParts: string[] = [];
-    const toolResults: AnthropicContentBlock[] = [];
-    let calledTool = false;
-    for (const block of assistantBlocks) {
-      if (block.type === "text") textParts.push(block.text);
-      else if (block.type === "tool_use") {
-        calledTool = true;
-        const tool = toolByName.get(block.name);
-        if (!tool) {
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: block.id,
-            content: JSON.stringify({ error: `unknown tool ${block.name}` }),
-          });
-          continue;
-        }
-        try {
-          const parsed = tool.inputSchema.parse(block.input ?? {});
-          const out = await tool.do(parsed);
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: block.id,
-            content: typeof out.data === "string" ? out.data : JSON.stringify(out.data),
-          });
-          additions.push({
-            role: "tool",
-            name: block.name,
-            tool_call_id: block.id,
-            content: JSON.stringify(out.data ?? {}),
-            ts: new Date().toISOString(),
-          });
-        } catch (e) {
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: block.id,
-            content: JSON.stringify({ error: (e as Error).message }),
-          });
-        }
-      }
-    }
-    finalText = textParts.join("\n").trim();
-    if (!calledTool || reply.stop_reason === "end_turn") {
-      if (finalText) additions.push({ role: "assistant", content: finalText, ts: new Date().toISOString() });
-      break;
-    }
-    messages.push({ role: "user", content: toolResults });
+  for (const tool of tools) {
+    // Fold with raw JSON Schema (version-independent): glove-core ships
+    // zod v4 while our tools use zod v3. We re-validate with the tool's own
+    // v3 schema inside the handler so coercion (uuid, enum, defaults) holds.
+    glove.fold({
+      name: tool.name,
+      description: tool.description,
+      jsonSchema: zodToJsonSchema(tool.inputSchema),
+      async do(input: unknown) {
+        const parsed = tool.inputSchema.parse(input ?? {});
+        return tool.do(parsed);
+      },
+    });
   }
 
-  await store.append(channel, handle, additions);
-  return finalText || "(no response)";
+  const runnable = glove.build(store);
+  const result = await runnable.processRequest(message);
+  return extractResponse(result);
 }
 
 const app = new Hono();
 
-app.get("/health", (c) => c.json({ ok: true, service: "ov-agent" }));
+app.get("/health", (c) =>
+  c.json({ ok: true, service: "ov-agent", model_configured: mimoConfigured("chat") }),
+);
 
 app.post("/chat", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
@@ -176,14 +120,94 @@ app.post("/chat", async (c) => {
   if (!body.channel || !body.handle || !body.message) {
     return c.json({ error: "channel, handle, message required" }, 400);
   }
+  if (!mimoConfigured("chat")) {
+    return c.json(
+      { error: "mimo not configured", response: "The agent isn't configured yet (missing MIMO_API_KEY)." },
+      503,
+    );
+  }
   try {
     const response = await chat(body.channel, body.handle, body.message);
     return c.json({ response });
   } catch (e) {
     log.error({ err: e }, "chat failed");
-    return c.json({ error: (e as Error).message, response: "Sorry, I couldn't process that." }, 500);
+    return c.json(
+      { error: (e as Error).message, response: "Sorry, I couldn't process that." },
+      500,
+    );
   }
 });
 
+/**
+ * Wipe a conversation so the next message starts a fresh Glove session.
+ * Used by the messenger "/reset" command. Idempotent — clearing a
+ * non-existent conversation is a no-op success.
+ */
+app.post("/reset", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    channel?: string;
+    handle?: string;
+  };
+  if (!body.channel || !body.handle) {
+    return c.json({ error: "channel, handle required" }, 400);
+  }
+  try {
+    await new PgConversationStore(sql, body.channel, body.handle).clear();
+    log.info({ channel: body.channel, handle: body.handle }, "conversation reset");
+    return c.json({ ok: true });
+  } catch (e) {
+    log.error({ err: e }, "reset failed");
+    return c.json({ error: (e as Error).message }, 500);
+  }
+});
+
+/**
+ * Self-provision the conversation store so the agent works regardless of
+ * whether the Postgres volume predates the Glove counter columns (the
+ * init.sql migration only runs on fresh init / `make migrate`).
+ */
+async function ensureSchema(): Promise<void> {
+  await sql`
+    CREATE TABLE IF NOT EXISTS agent_conversations (
+      id UUID PRIMARY KEY,
+      channel TEXT NOT NULL,
+      handle TEXT NOT NULL,
+      messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+      last_active TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (channel, handle)
+    )
+  `;
+  await sql`ALTER TABLE agent_conversations ADD COLUMN IF NOT EXISTS tokens_in BIGINT NOT NULL DEFAULT 0`;
+  await sql`ALTER TABLE agent_conversations ADD COLUMN IF NOT EXISTS tokens_out BIGINT NOT NULL DEFAULT 0`;
+  await sql`ALTER TABLE agent_conversations ADD COLUMN IF NOT EXISTS turns INT NOT NULL DEFAULT 0`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS agent_inbox (
+      id          TEXT PRIMARY KEY,
+      channel     TEXT NOT NULL,
+      handle      TEXT NOT NULL,
+      tag         TEXT NOT NULL,
+      request     TEXT NOT NULL,
+      response    TEXT,
+      status      TEXT NOT NULL DEFAULT 'pending',
+      blocking    BOOLEAN NOT NULL DEFAULT false,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      resolved_at TIMESTAMPTZ
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_agent_inbox_scope
+      ON agent_inbox (channel, handle, status)
+  `;
+}
+
 const port = Number(process.env.AGENT_PORT ?? 3000);
-serve({ fetch: app.fetch, port }, () => log.info({ port, model: MODEL }, "ov-agent ready"));
+ensureSchema()
+  .then(() =>
+    serve({ fetch: app.fetch, port }, () =>
+      log.info({ port }, "ov-agent ready (Glove + Mimo)"),
+    ),
+  )
+  .catch((e) => {
+    log.error({ err: e }, "schema init failed");
+    process.exit(1);
+  });

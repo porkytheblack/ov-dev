@@ -28,7 +28,7 @@ from overwatch_shared import (
     publish_event,
 )
 
-from .model import detector_singleton
+from .model import detector_singleton, fire_detector_singleton
 
 log = get_logger("ov-detector")
 
@@ -39,6 +39,12 @@ log = get_logger("ov-detector")
 # enormous backlog of stale detections. The cap bounds memory and worst-case
 # catch-up while staying far above incident-engine's working set.
 DETECTIONS_STREAM_MAXLEN = int(os.environ.get("DETECTIONS_STREAM_MAXLEN", "3000"))
+
+# Fire/smoke runs on a separate model at a throttled cadence (not per
+# frame) so its CPU cost is bounded — the explicit reason a VLM is NOT
+# used. At most one extra inference per camera per interval.
+FIRE_INTERVAL_SECONDS = float(os.environ.get("FIRE_INTERVAL_SECONDS", "5"))
+_last_fire: dict[str, float] = {}
 
 app = FastAPI(title="ov-detector")
 
@@ -124,6 +130,29 @@ async def consume_camera(camera_id: str, redis, minio) -> None:
         except Exception as e:
             log.warning("detect failed", camera_id=camera_id, error=str(e))
             detections = []
+        # Throttled fire/smoke pass on the dedicated model. Bounded cost:
+        # at most one extra inference per camera per FIRE_INTERVAL_SECONDS.
+        # Results merge into the same detections stream → overlay, DB and
+        # incident-engine all see them with class "fire"/"smoke".
+        if fire_detector_singleton.enabled:
+            now = asyncio.get_running_loop().time()
+            if now - _last_fire.get(camera_id, 0.0) >= FIRE_INTERVAL_SECONDS:
+                _last_fire[camera_id] = now
+                try:
+                    fire = await asyncio.to_thread(
+                        fire_detector_singleton.detect, img, camera_id
+                    )
+                    if fire:
+                        detections = list(detections) + fire
+                        log.warning(
+                            "fire/smoke detected",
+                            camera_id=camera_id,
+                            classes=[d["class"] for d in fire],
+                        )
+                except Exception as e:
+                    log.warning(
+                        "fire detect failed", camera_id=camera_id, error=str(e)
+                    )
         ts = datetime.fromisoformat(event["ts"].replace("Z", "+00:00"))
         await publish_event(
             redis,
