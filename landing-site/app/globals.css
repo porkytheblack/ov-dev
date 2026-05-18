@@ -1,0 +1,204 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Clean, warm-neutral light theme */
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-elev: #f7f6f3;
+    --border: #ebe9e4;
+    --border-strong: #d8d5cd;
+
+    --text: #1a1917;
+    --text-muted: #5c5953;
+    --text-dim: #94908a;
+
+    /* Amber accent, tuned for legibility on white */
+    --accent: #c9740a;
+    --accent-strong: #a85f06;
+    --accent-fill: #f5a623;
+    --accent-soft: #fdf3e3;
+    --accent-line: #ecca94;
+
+    --success: #0f8a5f;
+    --danger: #d6453d;
+
+    --on-accent: #1a1205;
+    --ring: rgba(201, 116, 10, 0.32);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  html,
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans), Inter, system-ui, sans-serif;
+    font-weight: 400;
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    overflow-x: hidden;
+  }
+
+  ::selection {
+    background: var(--accent-fill);
+    color: var(--on-accent);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--bg);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 9999px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .mono {
+    font-family: var(--font-mono), "JetBrains Mono", ui-monospace, monospace;
+    font-feature-settings: "tnum" 1;
+  }
+
+  .container-ov {
+    @apply mx-auto w-full max-w-[1180px] px-5 sm:px-8;
+  }
+
+  .eyebrow {
+    @apply mono inline-flex items-center gap-2 text-[12px] uppercase
+           tracking-[0.18em] text-accent;
+  }
+
+  .section-title {
+    @apply text-[clamp(1.9rem,4.4vw,3rem)] font-medium leading-[1.08]
+           tracking-[-0.02em] text-text;
+  }
+
+  .lead {
+    @apply text-[clamp(1rem,2vw,1.16rem)] leading-relaxed text-text-muted;
+  }
+
+  .btn,
+  .btn-primary,
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap
+           h-12 px-6 rounded-full mono uppercase tracking-[0.06em]
+           text-[13px] font-medium border transition-colors duration-150
+           select-none cursor-pointer
+           focus-visible:outline-none focus-visible:ring-2
+           focus-visible:ring-[color:var(--ring)];
+  }
+  .btn {
+    @apply border-border-strong bg-surface text-text hover:bg-surface-elev;
+  }
+  .btn-primary {
+    @apply border-transparent text-[color:var(--on-accent)] font-semibold;
+    background: var(--accent-fill);
+  }
+  .btn-primary:hover {
+    background: var(--accent-strong);
+    color: #fff;
+  }
+  .btn-ghost {
+    @apply border-transparent bg-transparent text-text-muted
+           hover:bg-surface-elev hover:text-text;
+  }
+
+  .pill {
+    @apply inline-flex items-center gap-1.5 mono uppercase
+           tracking-[0.06em] text-[11px] leading-none px-2.5 h-7
+           rounded-full border whitespace-nowrap;
+  }
+
+  .card {
+    @apply bg-surface border border-border rounded-2xl;
+  }
+
+  .hairline {
+    @apply h-px w-full bg-border;
+  }
+
+  .reveal {
+    opacity: 0;
+    transform: translateY(16px);
+    transition:
+      opacity 0.55s ease-out,
+      transform 0.55s ease-out;
+    will-change: opacity, transform;
+  }
+  .reveal.in {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* ---- Legal document prose ------------------------------------------- */
+  .legal {
+    @apply text-[15px] leading-relaxed text-text-muted;
+  }
+  .legal h2 {
+    @apply mt-12 mb-3 text-[1.35rem] font-medium tracking-[-0.01em] text-text;
+  }
+  .legal h2:first-child {
+    @apply mt-0;
+  }
+  .legal h3 {
+    @apply mt-8 mb-2 text-[1.05rem] font-medium text-text;
+  }
+  .legal p {
+    @apply my-4;
+  }
+  .legal ul {
+    @apply my-4 flex flex-col gap-2 pl-6;
+    list-style-type: disc;
+    list-style-position: outside;
+  }
+  .legal li {
+    @apply pl-1.5;
+    display: list-item;
+  }
+  .legal li::marker {
+    color: var(--accent);
+  }
+  .legal strong {
+    @apply font-semibold text-text;
+  }
+  .legal a {
+    @apply text-accent underline underline-offset-2;
+  }
+  .legal table {
+    @apply my-5 w-full border-collapse text-[14px];
+  }
+  .legal th {
+    @apply border-b border-border-strong py-2 pr-4 text-left mono text-[12px]
+           uppercase tracking-[0.06em] text-text-dim;
+  }
+  .legal td {
+    @apply border-b border-border py-2.5 pr-4 align-top;
+  }
+}
