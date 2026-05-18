@@ -8,6 +8,7 @@
     "./redis": "./src/redis.ts",
     "./db": "./src/db.ts",
     "./minio": "./src/minio.ts",
+    "./r2": "./src/r2.ts",
     "./logger": "./src/logger.ts"
   },
   "scripts": {

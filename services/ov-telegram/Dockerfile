@@ -16,7 +16,9 @@ COPY services/ov-telegram ./services/ov-telegram
 
 FROM node:20-alpine AS runtime
 WORKDIR /app
-RUN corepack enable
+# ffmpeg: camera clips are MPEG-4 Part 2 which Telegram's player renders as
+# a white frame — transcode to H.264 before upload.
+RUN apk add --no-cache ffmpeg && corepack enable
 COPY --from=build /app /app
 WORKDIR /app/services/ov-telegram
 ENV NODE_ENV=production

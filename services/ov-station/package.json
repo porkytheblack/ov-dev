@@ -1,0 +1,33 @@
+{
+  "name": "@overwatch/ov-station",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "dashboard": "station",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.11.0",
+    "@overwatch/ai": "workspace:*",
+    "@overwatch/schemas": "workspace:*",
+    "@overwatch/shared-ts": "workspace:*",
+    "hono": "^4.4.3",
+    "ioredis": "^5.4.1",
+    "postgres": "^3.4.4",
+    "station-adapter-postgres": "^1.0.4",
+    "station-broadcast": "^1.0.4",
+    "station-kit": "^1.1.0",
+    "station-signal": "^1.0.4",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "@types/uuid": "^9.0.8",
+    "tsx": "^4.7.2",
+    "typescript": "^5.4.5"
+  }
+}

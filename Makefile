@@ -1,4 +1,4 @@
-.PHONY: up down logs seed reset migrate codegen e2e build dev-rtsp test
+.PHONY: up down logs seed reset migrate codegen e2e build dev-rtsp test station-key
 
 up:
 	docker compose up -d --build
@@ -32,3 +32,9 @@ dev-rtsp:
 
 test:
 	pnpm -r --filter "@overwatch/*" test
+
+# Mint a Station API key (trigger+read) via the running ov-station-api.
+# Paste the printed sk_live_... into .env as STATION_API_KEY, then:
+#   docker compose up -d --no-deps ov-api
+station-key:
+	docker compose exec -T ov-station-api node < scripts/provision-station-key.mjs

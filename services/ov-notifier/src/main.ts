@@ -1,12 +1,15 @@
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import {
   ClipReady,
   CONSUMER_GROUP,
   IncidentOpened,
   STREAMS,
+  SummaryReady,
 } from "@overwatch/schemas/events";
 import {
   createGroupConsumer,
+  humanWhen,
   makeLogger,
   makeRedis,
   publishEvent,
@@ -16,6 +19,12 @@ import { signDeepLink } from "./deep-link.js";
 
 const log = makeLogger("ov-notifier");
 const CLIP_WAIT_MS = (Number(process.env.CLIP_WAIT_TIMEOUT_SECONDS ?? 120) || 120) * 1000;
+// The per-incident summary follow-up only makes sense as enrichment of a
+// just-sent alert. A late re-analysis (e.g. the morning/evening recap
+// force-analysing hours-old clips) must NOT spew one ping per old incident
+// into the chat — the recap already covers them.
+const SUMMARY_FOLLOWUP_MAX_AGE_MS =
+  (Number(process.env.SUMMARY_FOLLOWUP_MAX_AGE_MIN ?? 120) || 120) * 60_000;
 
 type PendingNotification = {
   incidentId: string;
@@ -75,23 +84,59 @@ function formatBody(args: {
   classes: string[];
   openedAt: string;
   summary: string | null;
-  deepLink: string;
 }) {
-  const opened = new Date(args.openedAt);
-  const rel = (() => {
-    const seconds = Math.max(1, Math.round((Date.now() - opened.getTime()) / 1000));
-    if (seconds < 60) return `${seconds}s ago`;
-    if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
-    return `${Math.round(seconds / 3600)}h ago`;
-  })();
+  const subjects =
+    args.classes
+      .map((c) => c.charAt(0).toUpperCase() + c.slice(1))
+      .join(", ") || "Motion";
   const summary = args.summary ?? "Generating summary…";
+  // No "[OVERWATCH]" prefix — the operator already knows the system. Time is
+  // a plain human phrase. The playback link rides as a structured `link`
+  // attachment (inline button), never inlined in the text.
   return (
-    `[OVERWATCH] Incident · ${args.cameraName}\n` +
-    `${args.classes.join(", ")} detected in ${args.roiName}\n` +
-    `Started ${rel}\n` +
-    `${summary}\n\n` +
-    `Playback → ${args.deepLink}`
+    `🚨 ${args.cameraName} — ${args.roiName}\n` +
+    `${subjects} spotted ${humanWhen(args.openedAt)}\n\n` +
+    `${summary}`
   );
+}
+
+/** Idempotent — the agent owns this table too; ensure it exists either way. */
+async function ensureInboxTable(sql: ReturnType<typeof postgres>) {
+  await sql`
+    CREATE TABLE IF NOT EXISTS agent_inbox (
+      id TEXT PRIMARY KEY, channel TEXT NOT NULL, handle TEXT NOT NULL,
+      tag TEXT NOT NULL, request TEXT NOT NULL, response TEXT,
+      status TEXT NOT NULL DEFAULT 'pending', blocking BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(), resolved_at TIMESTAMPTZ
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_agent_inbox_scope ON agent_inbox (channel, handle, status)`;
+  // Idempotency marker for the follow-up summary (incidents.notified_at
+  // already exists for the primary alert). Lets a reprocessed/reclaimed
+  // summary event after a notifier restart be skipped instead of resent.
+  await sql`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS summary_notified_at TIMESTAMPTZ`;
+}
+
+/**
+ * Post a notification to a subscriber's agent inbox as a *resolved* item so
+ * Glove surfaces it the next time that user messages the bot (then marks it
+ * consumed). This is how the agent "knows" about alerts sent while away.
+ */
+async function postInbox(
+  sql: ReturnType<typeof postgres>,
+  channel: string,
+  handle: string,
+  tag: string,
+  request: string,
+  response: string,
+) {
+  await sql`
+    INSERT INTO agent_inbox
+      (id, channel, handle, tag, request, response, status, blocking, created_at, resolved_at)
+    VALUES (${randomUUID()}, ${channel}, ${handle}, ${tag}, ${request},
+            ${response}, 'resolved', false, now(), now())
+    ON CONFLICT (id) DO NOTHING
+  `;
 }
 
 async function dispatch(
@@ -101,6 +146,20 @@ async function dispatch(
 ) {
   const meta = await fetchIncidentMeta(sql, pending.incidentId);
   if (!meta) return;
+  // Idempotency: atomically claim the exclusive right to notify this
+  // incident. Only the caller that flips notified_at from NULL proceeds —
+  // any duplicate (clip + clip-wait timeout both firing, or a stream
+  // message reprocessed by the XAUTOCLAIM reclaim after a notifier restart)
+  // finds it already set and bails, so alerts are never resent.
+  const claimed = await sql<Array<{ id: string }>>`
+    UPDATE incidents SET notified_at = now()
+     WHERE id = ${pending.incidentId}::uuid AND notified_at IS NULL
+    RETURNING id
+  `;
+  if (claimed.length === 0) {
+    log.info({ incidentId: pending.incidentId }, "already notified — skipping resend");
+    return;
+  }
   const secret = process.env.DEEP_LINK_TOKEN_SECRET ?? "change-me";
   const ttlHours = Number(process.env.DEEP_LINK_TTL_HOURS ?? 24) || 24;
   const link = signDeepLink({
@@ -111,7 +170,6 @@ async function dispatch(
   const subscribers = await resolveSubscribers(sql, pending.cameraId);
   if (subscribers.length === 0) {
     log.info({ incidentId: pending.incidentId }, "no subscribers");
-    await sql`UPDATE incidents SET notified_at = now() WHERE id = ${pending.incidentId}::uuid`;
     return;
   }
   const body = formatBody({
@@ -120,23 +178,33 @@ async function dispatch(
     classes: pending.classes,
     openedAt: pending.openedAt,
     summary: meta.summary,
-    deepLink: link.url,
   });
   for (const sub of subscribers) {
     const stream = STREAMS.bot_outbox(sub.channel);
+    const attachments: Array<{ kind: string; url: string; caption?: string }> = [
+      { kind: "link", url: link.url, caption: "View playback" },
+    ];
+    if (pending.clipUrl) {
+      attachments.unshift({ kind: "video", url: pending.clipUrl, caption: meta.cameraName });
+    }
     const payload = {
       type: "bot.outbox",
       channel: sub.channel,
       handle: sub.handle,
       text: body,
-      attachments: pending.clipUrl
-        ? [{ kind: "video", url: pending.clipUrl, caption: meta.cameraName }]
-        : undefined,
+      attachments,
       incident_id: pending.incidentId,
     };
     await publishEvent(redis, stream, payload as Record<string, unknown>);
+    await postInbox(
+      sql,
+      sub.channel,
+      sub.handle,
+      "alert",
+      `Alert: ${pending.classes.join(", ")} in ${meta.roiName} on ${meta.cameraName}`,
+      body,
+    ).catch((e) => log.warn({ err: e }, "inbox post failed"));
   }
-  await sql`UPDATE incidents SET notified_at = now() WHERE id = ${pending.incidentId}::uuid`;
   log.info({ incidentId: pending.incidentId, count: subscribers.length }, "dispatched");
 }
 
@@ -146,6 +214,8 @@ async function main() {
     process.env.DATABASE_URL ?? "postgres://overwatch:overwatch@postgres:5432/overwatch",
     { max: 4 },
   );
+
+  await ensureInboxTable(sql);
 
   const incidentConsumer = createGroupConsumer({
     redis,
@@ -193,6 +263,111 @@ async function main() {
     pending.posterUrl = urls.posterUrl;
     await dispatch(redis, sql, pending);
     waiting.delete(event.incident_id);
+  });
+
+  // Auto-summary delivery: when the vision pipeline finishes summarising a
+  // clip, send the summary to that incident's subscribers as a follow-up
+  // alert and post it to their agent inbox.
+  const summaryConsumer = createGroupConsumer({
+    redis,
+    stream: STREAMS.summaries,
+    group: CONSUMER_GROUP("ov-notifier-summaries"),
+    consumer: `notifier-${process.env.HOSTNAME ?? "local"}`,
+    schema: SummaryReady,
+  });
+  void summaryConsumer.consume(async (event) => {
+    if (event.type !== "summary.ready" || !event.summary?.trim()) return;
+    const rows = await sql<
+      Array<{
+        camera_id: string;
+        camera_name: string;
+        roi_name: string;
+        opened_at: string;
+        classes: string[];
+      }>
+    >`
+      SELECT i.camera_id, c.name AS camera_name, r.name AS roi_name,
+             i.opened_at, i.classes
+        FROM incidents i
+        JOIN cameras c ON c.id = i.camera_id
+        JOIN rois r ON r.id = i.roi_id
+       WHERE i.id = ${event.incident_id}::uuid
+    `;
+    const m = rows[0];
+    if (!m) return;
+    // Recency guard: skip the chat follow-up for stale incidents (recap /
+    // late re-analysis). No claim needed — a reprocess stays stale too.
+    if (Date.now() - new Date(m.opened_at).getTime() > SUMMARY_FOLLOWUP_MAX_AGE_MS) {
+      log.info(
+        { incidentId: event.incident_id },
+        "stale incident — summary follow-up suppressed (covered by recap)",
+      );
+      return;
+    }
+    // Idempotency (same rationale as dispatch): claim the summary send once
+    // so a reclaimed/reprocessed summary event after a restart isn't resent.
+    const claimedSummary = await sql<Array<{ id: string }>>`
+      UPDATE incidents SET summary_notified_at = now()
+       WHERE id = ${event.incident_id}::uuid AND summary_notified_at IS NULL
+      RETURNING id
+    `;
+    if (claimedSummary.length === 0) {
+      log.info({ incidentId: event.incident_id }, "summary already sent — skipping resend");
+      return;
+    }
+    const subscribers = await resolveSubscribers(sql, m.camera_id);
+    const secret = process.env.DEEP_LINK_TOKEN_SECRET ?? "change-me";
+    const ttlHours = Number(process.env.DEEP_LINK_TTL_HOURS ?? 24) || 24;
+    const link = signDeepLink({ incidentId: event.incident_id, secret, ttlHours });
+    // Telegram can edit the original alert in place — send the FULL
+    // recomposed body (now with the real summary) + edit flag, keeping the
+    // playback link so the keyboard is rebuilt. WhatsApp has no edit API →
+    // it still gets the compact follow-up.
+    const tgText = formatBody({
+      cameraName: m.camera_name,
+      roiName: m.roi_name,
+      classes: m.classes ?? [],
+      openedAt: m.opened_at,
+      summary: event.summary,
+    });
+    const waText = `📝 ${m.camera_name} — ${m.roi_name}\n${event.summary}`;
+    for (const sub of subscribers) {
+      const payload =
+        sub.channel === "telegram"
+          ? {
+              type: "bot.outbox",
+              channel: sub.channel,
+              handle: sub.handle,
+              text: tgText,
+              incident_id: event.incident_id,
+              edit: true,
+              attachments: [
+                { kind: "link", url: link.url, caption: "View playback" },
+              ],
+            }
+          : {
+              type: "bot.outbox",
+              channel: sub.channel,
+              handle: sub.handle,
+              text: waText,
+              incident_id: event.incident_id,
+              suppress_actions: true,
+            };
+      await publishEvent(
+        redis,
+        STREAMS.bot_outbox(sub.channel),
+        payload as Record<string, unknown>,
+      );
+      await postInbox(
+        sql,
+        sub.channel,
+        sub.handle,
+        "incident-summary",
+        `Auto-summary for the ${m.roi_name} incident on ${m.camera_name}`,
+        event.summary,
+      ).catch((e) => log.warn({ err: e }, "inbox summary post failed"));
+    }
+    log.info({ incidentId: event.incident_id, count: subscribers.length }, "summary dispatched");
   });
 
   const server = createServer((req, res) => {

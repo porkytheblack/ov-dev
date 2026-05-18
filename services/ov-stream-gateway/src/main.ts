@@ -49,14 +49,20 @@ async function authCheck(req: Request): Promise<boolean> {
   }
 }
 
-async function startMediamtx() {
+/** Render the per-camera mediamtx config from the DB; return it (and write
+ * it to disk) or null if the DB read failed. */
+async function renderAndWrite(): Promise<string | null> {
   try {
     const yml = await renderMediamtxYml(sql);
     writeFileSync("/tmp/mediamtx.yml", yml, "utf8");
-    log.info("mediamtx config written");
+    return yml;
   } catch (e) {
     log.warn({ err: e }, "could not render mediamtx config");
+    return null;
   }
+}
+
+function spawnMediamtx(): ReturnType<typeof spawn> {
   const proc = spawn("mediamtx", ["/tmp/mediamtx.yml"], {
     stdio: ["ignore", "inherit", "inherit"],
   });
@@ -140,12 +146,62 @@ app.get("/stream/:cameraId/hls/*", async (c) => {
   return proxy(`${MEDIAMTX_HLS}/${camPath(id)}${path}`, c.req.raw, `/stream/${id}/hls`);
 });
 
-const proc = await startMediamtx();
+/** Stable fingerprint of the enabled-camera set — what actually decides a
+ * reload. Deterministic (ORDER BY id) so it doesn't churn on row order. */
+async function cameraFingerprint(): Promise<string | null> {
+  try {
+    const rows = await sql<Array<{ id: string; rtsp_url: string; fps: number }>>`
+      SELECT id, rtsp_url, COALESCE(stream_fps, 0) AS fps
+        FROM cameras WHERE enabled = true ORDER BY id
+    `;
+    return rows.map((r) => `${r.id}|${r.rtsp_url}|${r.fps}`).join("\n");
+  } catch {
+    return null;
+  }
+}
+
+await renderAndWrite();
+let lastFp = await cameraFingerprint();
+let mtxProc = spawnMediamtx();
+log.info("mediamtx started");
+
+// The mediamtx config is derived purely from the DB and was previously
+// rendered ONCE at startup — so a camera added/edited/enabled afterwards
+// got no media path and showed a black stream until a manual restart.
+// Poll the DB and, when the enabled-camera set (ids / rtsp_url / fps)
+// changes the rendered config, rewrite it and cycle mediamtx. The brief
+// (~1s) blip only happens on an actual camera change (a rare operator
+// action); on-demand transcoders respawn when viewers reconnect.
+let reconciling = false;
+const reconcileMs = Number(process.env.STREAM_RECONCILE_MS ?? 15000);
+setInterval(async () => {
+  if (reconciling) return;
+  reconciling = true;
+  try {
+    const fp = await cameraFingerprint();
+    if (fp !== null && fp !== lastFp) {
+      lastFp = fp;
+      await renderAndWrite();
+      log.info("camera set changed → reloading mediamtx");
+      mtxProc.kill("SIGTERM");
+      await new Promise<void>((resolve) => {
+        mtxProc.once("exit", () => resolve());
+        setTimeout(resolve, 3000);
+      });
+      mtxProc = spawnMediamtx();
+    }
+  } catch (e) {
+    log.warn({ err: e }, "mediamtx reconcile failed");
+  } finally {
+    reconciling = false;
+  }
+}, reconcileMs).unref();
+
 const port = Number(process.env.STREAM_GATEWAY_PORT ?? 8989);
 serve({ fetch: app.fetch, port }, () => log.info({ port }, "ov-stream-gateway HTTP ready"));
 
 const onSignal = async () => {
-  proc.kill("SIGTERM");
+  mtxProc.kill("SIGTERM");
   await sql.end({ timeout: 5 });
   process.exit(0);
 };
