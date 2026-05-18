@@ -43,6 +43,7 @@ export function Footer() {
               links: [
                 ["Terms of Service", "/terms"],
                 ["Privacy Policy", "/privacy-policy"],
+                ["Data Processing Agreement", "/dpa"],
               ],
             },
           ].map((col) => (

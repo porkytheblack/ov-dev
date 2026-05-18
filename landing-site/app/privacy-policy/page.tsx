@@ -70,9 +70,10 @@ export default function PrivacyPolicyPage() {
           any camera footage or video.
         </strong>{" "}
         The arrangements described below apply only under the Overwatch Service
-        and are governed by separate, binding Product Terms, an Order and a Data
-        Processing Agreement (DPA), which will be provided to, and must be
-        accepted by, a Customer <strong>before</strong> any hosted processing of
+        and are governed by separate, binding Product Terms, an Order and a{" "}
+        <a href="/dpa">Data Processing Agreement</a> (DPA), which will be
+        provided to, and must be accepted by, a Customer{" "}
+        <strong>before</strong> any hosted processing of
         that Customer&apos;s video takes place. This summary does not create any
         contractual obligation and may change before launch; the Product Terms,
         Order and DPA will prevail in the event of any inconsistency.
