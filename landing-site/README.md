@@ -1,21 +1,21 @@
-# Overwatch — Marketing Site
+# Overwatch — Marketing & Waitlist Site
 
-Standalone marketing / landing site for **Overwatch**, the multi-camera AI
-surveillance system.
+Standalone pre-launch **waitlist** site for **Overwatch**, multi-camera AI
+surveillance that messages you on WhatsApp or Telegram when it counts.
 
-> Meet your new security guard — always watching, always ready to keep you safe.
+> Meet your new security guard — always watching, always ready.
 
-This is **not** part of the Docker stack or the pnpm monorepo. It is a
-self-contained Next.js app deployed independently on **Vercel**.
+Operated by **Cradle Labs Limited**. This is a self-contained Next.js app
+deployed independently on **Vercel** (it is not wired into the product
+stack or the pnpm monorepo).
 
 ## Stack
 
-- Next.js 14 (App Router) + React 18
-- Tailwind CSS, tuned to the Overwatch brand palette
-- Inter + JetBrains Mono via `next/font` (self-hosted at build time)
+- Next.js 16 (App Router) + React 19
+- Tailwind CSS — clean, light-by-default brand theme
+- Inter + JetBrains Mono via `next/font` (fetched at build time)
 - Zero external image dependencies — every camera feed, phone mock and
-  chat UI is hand-built SVG/CSS, so it deploys with no asset pipeline and
-  renders instantly
+  chat UI is hand-built SVG/CSS, so it deploys with no asset pipeline
 
 ## Local development
 
@@ -37,44 +37,59 @@ npm run typecheck    # tsc --noEmit
 
 1. Create a new Vercel project from this repository.
 2. Set **Root Directory** to `landing-site`.
-3. Framework preset: **Next.js** (auto-detected). Build command
-   `next build`, install command `npm install` — both pinned in
-   `vercel.json`.
-4. No environment variables required.
+3. Framework preset: **Next.js** (auto-detected). Build/install commands
+   are pinned in `vercel.json`.
+4. Optional: set `NEXT_PUBLIC_WAITLIST_ENDPOINT` to a URL that accepts
+   `POST { email }` (e.g. a form/CRM provider). If unset, the form
+   validates and shows the success state without sending anywhere — wire
+   this up before launch so signups are captured.
 
-The site is fully static/SSG — no backend, no API routes, no secrets.
+The site is fully static/SSG. No backend, no secrets.
 
-## What it shows
+## Pages
 
-- The tagline and positioning ("your new security guard")
-- The problem: cameras record but don't watch
-- How it works in four steps
-- An interactive showcase of real scenarios on phone mocks:
-  - Intrusion alert on WhatsApp
-  - Fire & smoke alert on Telegram with inline actions
-  - Asking the agent "what happened in the last hour?"
-  - A scheduled overnight briefing
-- Capability grid, a dashboard live-view mock, channel breakdown,
-  the self-hosted/privacy story, and a get-started CTA
+- `/` — the landing page (hero, problem, how it works, interactive
+  showcase, features, dashboard view, channels, trust, waitlist)
+- `/terms` — Terms of Service (Cradle Labs Limited)
+- `/privacy-policy` — Privacy Policy (Cradle Labs Limited)
+
+> The legal pages are templates with clearly bracketed placeholders
+> (`[DATE]`, `[Contact email: hello@ — confirm]`,
+> `[Registered address — confirm]`, `[Governing law … — confirm]`).
+> Fill these in and have them reviewed by a qualified lawyer before
+> launch.
+
+## The interactive showcase
+
+A tabbed demo of what actually arrives on a phone:
+
+- **Intrusion** — person at the gate at night → WhatsApp
+- **Fire & smoke** — urgent alert with one-tap actions → Telegram
+- **Ask it** — "what happened last hour?" → conversational reply on
+  WhatsApp
+- **Briefing** — scheduled overnight rollup → Telegram
 
 ## Structure
 
 ```
 landing-site/
 ├── app/
-│   ├── layout.tsx        # fonts, metadata, viewport
-│   ├── globals.css       # brand tokens + component classes
-│   ├── icon.svg          # favicon
-│   └── page.tsx          # composes the sections
+│   ├── layout.tsx            # fonts, SEO metadata, viewport
+│   ├── globals.css           # light brand tokens + component/legal styles
+│   ├── icon.svg              # favicon
+│   ├── page.tsx              # composes the landing sections
+│   ├── terms/page.tsx
+│   └── privacy-policy/page.tsx
 └── components/
-    ├── Nav, Hero, TrustStrip, Problem, HowItWorks,
-    │   Showcase, Features, LiveView, Channels, Privacy, CTA, Footer
-    ├── Reveal.tsx         # scroll-reveal wrapper
-    ├── Wordmark.tsx       # logo + pulsing mark
+    ├── Nav, Hero, Problem, HowItWorks, Showcase, Features,
+    │   LiveView, Channels, Trust, Waitlist, Footer
+    ├── LegalPage.tsx         # shared chrome for legal pages
+    ├── Reveal.tsx            # scroll-reveal wrapper
+    ├── Wordmark.tsx          # logo + pulsing mark
     └── mocks/
         ├── PhoneFrame.tsx     # device bezel + status bar
         ├── CameraFeed.tsx     # SVG CCTV scenes + detection overlays
-        ├── WhatsAppChat.tsx   # WhatsApp UI + incident card
-        ├── TelegramChat.tsx   # Telegram UI + inline keyboard
+        ├── WhatsAppChat.tsx   # WhatsApp UI (light) + incident card
+        ├── TelegramChat.tsx   # Telegram UI (light) + inline keyboard
         └── Typing.tsx         # agent typing indicator
 ```

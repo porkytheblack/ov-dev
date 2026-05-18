@@ -1,31 +1,29 @@
 import { PhoneFrame } from "./mocks/PhoneFrame";
 import { WhatsAppChat, WaBubble, WaIncidentCard } from "./mocks/WhatsAppChat";
-import { CameraFeed } from "./mocks/CameraFeed";
 import { Reveal } from "./Reveal";
 
 export function Hero() {
   return (
     <section id="top" className="relative overflow-hidden pt-16">
-      <div className="pointer-events-none absolute inset-0 grid-bg opacity-[0.55]" />
       <div
-        className="pointer-events-none absolute -top-40 left-1/2 h-[560px] w-[920px] -translate-x-1/2 rounded-full opacity-60"
+        className="pointer-events-none absolute inset-x-0 top-0 h-[620px]"
         style={{
           background:
-            "radial-gradient(ellipse at center, rgba(245,173,74,0.16), transparent 62%)",
+            "radial-gradient(ellipse 70% 60% at 50% -8%, var(--accent-soft), transparent 70%)",
         }}
       />
 
-      <div className="container-ov relative grid items-center gap-14 py-20 lg:grid-cols-[1.05fr_0.95fr] lg:py-28">
+      <div className="container-ov relative grid items-center gap-14 py-20 lg:grid-cols-[1.05fr_0.95fr] lg:py-24">
         <div>
           <Reveal>
             <span className="eyebrow">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent animate-pulse-mark" />
-              Multi-camera AI surveillance
+              Now boarding
             </span>
           </Reveal>
 
           <Reveal delay={60}>
-            <h1 className="mt-5 text-[clamp(2.6rem,6.4vw,4.6rem)] font-medium leading-[1.02] tracking-[-0.03em]">
+            <h1 className="mt-5 text-[clamp(2.5rem,6vw,4.3rem)] font-medium leading-[1.04] tracking-[-0.03em]">
               Meet your new
               <br />
               <span className="text-accent">security guard.</span>
@@ -34,16 +32,17 @@ export function Hero() {
 
           <Reveal delay={120}>
             <p className="lead mt-6 max-w-[34rem]">
-              Always watching, always ready to keep you safe. Overwatch turns
-              the cameras you already have into an AI guard that spots trouble
-              and messages you on WhatsApp or Telegram the moment it matters.
+              Always watching, always ready. Overwatch connects to the cameras
+              you already own, runs real-time AI vision on the zones that
+              matter, and messages you the moment something&apos;s actually
+              wrong.
             </p>
           </Reveal>
 
           <Reveal delay={180}>
             <div className="mt-9 flex flex-wrap items-center gap-3">
-              <a href="#get-started" className="btn-primary">
-                Get started
+              <a href="#waitlist" className="btn-primary">
+                Join the waitlist
               </a>
               <a href="#showcase" className="btn">
                 See it in action
@@ -54,9 +53,9 @@ export function Hero() {
           <Reveal delay={240}>
             <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-2">
               {[
-                "Self-hosted",
-                "Footage never leaves your network",
-                "No subscriptions",
+                "Real-time AI vision",
+                "80+ object classes",
+                "Alerts in seconds",
               ].map((t) => (
                 <span
                   key={t}
@@ -85,36 +84,27 @@ export function Hero() {
         </div>
 
         <Reveal delay={140} className="relative">
-          <div className="relative mx-auto w-fit">
-            <PhoneFrame>
-              <WhatsAppChat subtitle="online · security bot">
-                <WaBubble side="in" time="02:15" noPad>
-                  <WaIncidentCard />
-                </WaBubble>
-                <WaBubble side="out" time="02:15" ticks>
-                  On it. Sending someone to check now.
-                </WaBubble>
-                <WaBubble side="in" time="02:15">
-                  Acknowledged. I&apos;ll keep watching and update you if it
-                  escalates.
-                </WaBubble>
-              </WhatsAppChat>
-            </PhoneFrame>
-
-            <div className="absolute -left-24 top-24 hidden w-[230px] rotate-[-5deg] xl:block">
-              <div className="rounded-xl border border-border bg-surface p-2 shadow-elev">
-                <CameraFeed
-                  scene="perimeter"
-                  camera="CAM-03 · WEST FENCE"
-                  time="02:11:55"
-                  tag="LIVE"
-                />
-                <p className="mono mt-2 px-1 pb-1 text-[10px] uppercase tracking-[0.1em] text-text-dim">
-                  4 cameras · 1 incident open
-                </p>
-              </div>
-            </div>
-          </div>
+          <div
+            className="pointer-events-none absolute inset-0 -z-10 mx-auto my-auto h-[440px] w-[440px] rounded-full"
+            style={{
+              background:
+                "radial-gradient(circle, var(--accent-soft), transparent 65%)",
+            }}
+          />
+          <PhoneFrame>
+            <WhatsAppChat subtitle="online · security bot">
+              <WaBubble side="in" time="02:15" noPad>
+                <WaIncidentCard />
+              </WaBubble>
+              <WaBubble side="out" time="02:15" ticks>
+                On it — sending someone to check now.
+              </WaBubble>
+              <WaBubble side="in" time="02:16">
+                Acknowledged. Still in frame. I&apos;ll message you if it
+                escalates.
+              </WaBubble>
+            </WhatsAppChat>
+          </PhoneFrame>
         </Reveal>
       </div>
 

@@ -4,27 +4,29 @@
 
 @layer base {
   :root {
-    --bg: #0a0c10;
-    --surface: #14171d;
-    --surface-elev: #1c2027;
-    --border: #272b33;
-    --border-strong: #3a3f4a;
+    /* Clean, warm-neutral light theme */
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-elev: #f7f6f3;
+    --border: #ebe9e4;
+    --border-strong: #d8d5cd;
 
-    --text: #eef0f3;
-    --text-muted: #9aa1ad;
-    --text-dim: #6b7280;
+    --text: #1a1917;
+    --text-muted: #5c5953;
+    --text-dim: #94908a;
 
-    --accent: #f5ad4a;
-    --accent-strong: #ffc36b;
-    --accent-dim: #5a3a12;
+    /* Amber accent, tuned for legibility on white */
+    --accent: #c9740a;
+    --accent-strong: #a85f06;
+    --accent-fill: #f5a623;
+    --accent-soft: #fdf3e3;
+    --accent-line: #ecca94;
 
-    --success: #34d399;
-    --danger: #f87171;
+    --success: #0f8a5f;
+    --danger: #d6453d;
 
     --on-accent: #1a1205;
-
-    --accent-soft: rgba(245, 173, 74, 0.12);
-    --ring: rgba(245, 173, 74, 0.35);
+    --ring: rgba(201, 116, 10, 0.32);
   }
 
   html {
@@ -45,8 +47,12 @@
     text-rendering: optimizeLegibility;
   }
 
+  body {
+    overflow-x: hidden;
+  }
+
   ::selection {
-    background: var(--accent);
+    background: var(--accent-fill);
     color: var(--on-accent);
   }
 
@@ -90,12 +96,12 @@
   }
 
   .section-title {
-    @apply text-[clamp(1.9rem,4.4vw,3.1rem)] font-medium leading-[1.08]
+    @apply text-[clamp(1.9rem,4.4vw,3rem)] font-medium leading-[1.08]
            tracking-[-0.02em] text-text;
   }
 
   .lead {
-    @apply text-[clamp(1rem,2vw,1.18rem)] leading-relaxed text-text-muted;
+    @apply text-[clamp(1rem,2vw,1.16rem)] leading-relaxed text-text-muted;
   }
 
   .btn,
@@ -109,12 +115,15 @@
            focus-visible:ring-[color:var(--ring)];
   }
   .btn {
-    @apply border-border-strong bg-surface-elev text-text
-           hover:bg-border-strong;
+    @apply border-border-strong bg-surface text-text hover:bg-surface-elev;
   }
   .btn-primary {
-    @apply border-accent bg-accent text-[color:var(--on-accent)] font-semibold
-           hover:bg-accent-strong hover:border-accent-strong;
+    @apply border-transparent text-[color:var(--on-accent)] font-semibold;
+    background: var(--accent-fill);
+  }
+  .btn-primary:hover {
+    background: var(--accent-strong);
+    color: #fff;
   }
   .btn-ghost {
     @apply border-transparent bg-transparent text-text-muted
@@ -129,15 +138,6 @@
 
   .card {
     @apply bg-surface border border-border rounded-2xl;
-  }
-
-  .grid-bg {
-    background-image:
-      linear-gradient(var(--border) 1px, transparent 1px),
-      linear-gradient(90deg, var(--border) 1px, transparent 1px);
-    background-size: 56px 56px;
-    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 35%, transparent 75%);
-    mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 35%, transparent 75%);
   }
 
   .hairline {
@@ -155,5 +155,61 @@
   .reveal.in {
     opacity: 1;
     transform: none;
+  }
+
+  /* ---- Legal document prose ------------------------------------------- */
+  .legal {
+    @apply text-[15px] leading-relaxed text-text-muted;
+  }
+  .legal h2 {
+    @apply mt-12 mb-3 text-[1.35rem] font-medium tracking-[-0.01em] text-text;
+  }
+  .legal h2:first-child {
+    @apply mt-0;
+  }
+  .legal h3 {
+    @apply mt-8 mb-2 text-[1.05rem] font-medium text-text;
+  }
+  .legal p {
+    @apply my-4;
+  }
+  .legal ul {
+    @apply my-4 space-y-2 pl-1;
+  }
+  .legal li {
+    @apply flex gap-3;
+  }
+  .legal li::before {
+    content: "";
+    @apply mt-[10px] inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent;
+  }
+  .legal strong {
+    @apply font-semibold text-text;
+  }
+  .legal a {
+    @apply text-accent underline underline-offset-2;
+  }
+  .legal .lead-note {
+    @apply my-6 text-[14px] italic text-text-dim;
+  }
+  .legal .callout {
+    @apply my-3 flex items-start gap-2 rounded-xl border
+           bg-[color:var(--accent-soft)] px-4 py-3 text-[13px] not-italic
+           text-text;
+    border-color: var(--accent-line);
+  }
+  .legal .callout::before {
+    content: "›";
+    @apply mono font-semibold text-accent;
+  }
+  .legal table {
+    @apply my-5 w-full border-collapse text-[14px];
+  }
+  .legal th {
+    @apply border-b border-border-strong py-2 pr-4 text-left mono text-[12px]
+           uppercase tracking-[0.06em] text-text-dim;
+  }
+  .legal td {
+    @apply border-b border-border py-2.5 pr-4 align-top;
   }
 }

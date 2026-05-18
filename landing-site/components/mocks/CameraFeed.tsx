@@ -355,22 +355,26 @@ export function CameraFeed({
             {camera}
           </span>
           <span
-            className={`mono inline-flex items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.1em] ${
-              tag === "INCIDENT"
-                ? "text-danger"
-                : tag === "LIVE"
-                  ? "text-accent"
-                  : "text-white/85"
-            }`}
+            className="mono inline-flex items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.1em]"
+            style={{
+              color:
+                tag === "INCIDENT"
+                  ? "#ff6b6b"
+                  : tag === "LIVE"
+                    ? "#f5ad4a"
+                    : "rgba(255,255,255,0.85)",
+            }}
           >
             <span
-              className={`inline-block h-1.5 w-1.5 rounded-full ${
-                tag === "INCIDENT"
-                  ? "bg-danger"
-                  : tag === "LIVE"
-                    ? "bg-accent"
-                    : "bg-white/70"
-              } animate-blink`}
+              className="inline-block h-1.5 w-1.5 rounded-full animate-blink"
+              style={{
+                background:
+                  tag === "INCIDENT"
+                    ? "#ff6b6b"
+                    : tag === "LIVE"
+                      ? "#f5ad4a"
+                      : "rgba(255,255,255,0.7)",
+              }}
             />
             {tag}
           </span>

@@ -2,17 +2,8 @@
 
 import { useState, ReactNode } from "react";
 import { PhoneFrame } from "./mocks/PhoneFrame";
-import {
-  WhatsAppChat,
-  WaBubble,
-  WaIncidentCard,
-} from "./mocks/WhatsAppChat";
-import {
-  TelegramChat,
-  TgBubble,
-  TgFireCard,
-  TgInlineKeyboard,
-} from "./mocks/TelegramChat";
+import { WhatsAppChat, WaBubble, WaIncidentCard } from "./mocks/WhatsAppChat";
+import { TelegramChat, TgBubble, TgFireCard } from "./mocks/TelegramChat";
 import { TypingDots } from "./mocks/Typing";
 import { Reveal } from "./Reveal";
 
@@ -31,12 +22,12 @@ const tabs: Tab[] = [
     id: "intrusion",
     tag: "Intrusion",
     channel: "WhatsApp",
-    title: "Someone in the driveway at 2am",
-    body: "A person crosses into the driveway zone and lingers by the gate. After the linger threshold, Overwatch opens an incident and messages you — with the clip and boxes already drawn.",
+    title: "Person at the gate, 2AM",
+    body: "Someone enters a watched zone after hours and stays. Overwatch opens an incident and sends the clip before they reach the door.",
     points: [
-      "Object tracked across frames, not a one-off motion blip",
-      "Notification only after it genuinely lingers — no false alarms",
-      "Plain-language summary of what it saw",
+      "Night-only zone, triggered on linger",
+      "Clip with bounding boxes drawn in",
+      "Poster frame and a plain-language summary",
     ],
     phone: (
       <PhoneFrame>
@@ -48,8 +39,7 @@ const tabs: Tab[] = [
             On it — checking the camera now.
           </WaBubble>
           <WaBubble side="in" time="02:16">
-            Acknowledged. Still in frame. I&apos;ll message you if it escalates
-            or leaves.
+            Acknowledged. Still in frame — I&apos;ll flag if it escalates.
           </WaBubble>
         </WhatsAppChat>
       </PhoneFrame>
@@ -59,12 +49,12 @@ const tabs: Tab[] = [
     id: "fire",
     tag: "Fire & smoke",
     channel: "Telegram",
-    title: "Fire breaks out behind the shed",
-    body: "Flames and smoke are detected in the rear yard. This isn't a slow linger — it escalates in seconds. Overwatch fires immediately and gives you one-tap actions right in the chat.",
+    title: "Smoke detected. Acknowledge now.",
+    body: "Fire and smoke are flagged the instant they appear, with one-tap actions so you can respond without typing a word.",
     points: [
-      "Fire and smoke classes escalate without waiting",
-      "Inline buttons: view playback or acknowledge in one tap",
-      "Every subscriber on that camera is notified at once",
+      "Urgent priority, sent immediately",
+      "One-tap acknowledge, inline",
+      "Clip and poster of the source",
     ],
     phone: (
       <PhoneFrame>
@@ -75,24 +65,20 @@ const tabs: Tab[] = [
           <TgBubble side="out" time="23:49">
             Calling it in now.
           </TgBubble>
-          <TgBubble side="in" time="23:49">
-            Acknowledged by you at 23:49. Smoke still rising — I&apos;ll keep the
-            clip running until it clears.
-          </TgBubble>
         </TelegramChat>
       </PhoneFrame>
     ),
   },
   {
     id: "ask",
-    tag: "Ask anything",
+    tag: "Ask it",
     channel: "WhatsApp",
-    title: "Just ask what happened",
-    body: "Overwatch is a conversational agent, not a one-way siren. Ask it in plain language and it queries your incident history and answers factually — never made up.",
+    title: "“What happened last hour?”",
+    body: "Reply in plain language and get a factual answer pulled from real incident data — never invented.",
     points: [
-      "Understands “last hour”, “overnight”, “this week”",
-      "Answers only from real incident data via its tools",
-      "Pull up any clip without opening the dashboard",
+      "Natural-language questions",
+      "Answers from real incidents only",
+      "“Show me the gate clip” → it sends it",
     ],
     phone: (
       <PhoneFrame>
@@ -102,27 +88,18 @@ const tabs: Tab[] = [
           </WaBubble>
           <TypingDots tint="wa" />
           <WaBubble side="in" time="08:02">
-            <p>In the last hour I logged 3 incidents:</p>
-            <p className="mono mt-1.5 text-[12px] leading-relaxed text-[#cfd5da]">
-              07:14 · Front Gate — 1 person, driveway (64s) · ack&apos;d
+            <p>3 incidents in the last hour:</p>
+            <p className="mono mt-1.5 text-[12px] leading-relaxed text-[#3b4a54]">
+              07:14 · Front Gate — person (64s) · ack&apos;d
               <br />
-              07:31 · West Fence — 1 person · suppressed (left in 7s)
+              07:31 · West Fence — person · suppressed
               <br />
-              07:55 · Driveway — 1 vehicle + 1 person · closed
+              07:55 · Driveway — vehicle + person · closed
             </p>
-            <p className="mt-1.5">
-              Only the 07:14 one is still worth a look. Want the clip?
-            </p>
+            <p className="mt-1.5">Only 07:14 is worth a look. Want the clip?</p>
           </WaBubble>
           <WaBubble side="out" time="08:03" ticks>
-            yes, show me the gate one
-          </WaBubble>
-          <WaBubble side="in" time="08:03">
-            Front Gate · 07:14 — person lingered 64s near the gate, no vehicle.
-            <br />
-            <span className="mono text-[12px] text-[#53bdeb]">
-              overwatch.local/i/8f3a…
-            </span>
+            yes, send the gate one
           </WaBubble>
         </WhatsAppChat>
       </PhoneFrame>
@@ -130,42 +107,38 @@ const tabs: Tab[] = [
   },
   {
     id: "briefing",
-    tag: "Daily briefing",
+    tag: "Briefing",
     channel: "Telegram",
-    title: "A summary while you slept",
-    body: "Wake up to a clear picture instead of a folder of footage. Overwatch rolls the night up into one message so you know in five seconds whether anything needs you.",
+    title: "Your overnight rollup",
+    body: "A scheduled briefing summarizes everything that happened while you slept — quiet nights stay quiet.",
     points: [
-      "Scheduled rollups across every camera",
-      "Counts, statuses and the one thing worth your attention",
-      "Drill into any incident straight from the summary",
+      "Scheduled rollups, your cadence",
+      "Summary with incident counts",
+      "Tap through to any clip",
     ],
     phone: (
       <PhoneFrame>
         <TelegramChat subtitle="bot · summaries">
           <TgBubble side="in" time="06:00">
-            <p className="font-semibold text-accent">
+            <p className="font-semibold text-[#b15c00]">
               [OVERWATCH] Overnight summary
             </p>
-            <p className="mono mt-1 text-[11px] text-[#7d8b99]">
+            <p className="mono mt-1 text-[11px] text-[#8a9aa5]">
               22:00 → 06:00 · 4 cameras online
             </p>
-            <p className="mono mt-2 text-[12px] leading-relaxed text-[#cdd6df]">
-              Front Gate ···· 2 incidents · both ack&apos;d
+            <p className="mono mt-2 text-[12px] leading-relaxed text-[#3b4a54]">
+              Front Gate ···· 2 · both ack&apos;d
               <br />
-              West Fence ··· 1 suppressed
+              West Fence ··· 1 · suppressed
               <br />
-              Driveway ····· 1 closed
+              Driveway ····· 1 · closed
               <br />
               Rear Yard ···· 0
             </p>
-            <p className="mt-2 text-[#cdd6df]">
+            <p className="mt-2 text-[#1a1a1a]">
               Quietest night this week. Nothing open. The 02:14 gate visitor is
               the only clip worth a glance.
             </p>
-          </TgBubble>
-          <TgBubble side="in" time="06:00">
-            Want the full incident list or just the gate clip?
-            <TgInlineKeyboard />
           </TgBubble>
           <TgBubble side="out" time="07:18">
             all clear, thanks
@@ -184,13 +157,11 @@ export function Showcase() {
     <section id="showcase" className="container-ov py-24 lg:py-28">
       <Reveal>
         <div className="max-w-2xl">
-          <span className="eyebrow">In action</span>
-          <h2 className="section-title mt-4">
-            See what lands on your phone
-          </h2>
+          <span className="eyebrow">In the field</span>
+          <h2 className="section-title mt-4">This is what arrives.</h2>
           <p className="lead mt-5">
-            Real incidents, real conversations — on the apps you already use.
-            Tap through a few.
+            No app to open. The incident comes to you, with the evidence
+            attached.
           </p>
         </div>
       </Reveal>
@@ -202,9 +173,14 @@ export function Showcase() {
             onClick={() => setActive(i)}
             className={`mono inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[12px] uppercase tracking-[0.08em] transition-colors duration-150 ${
               i === active
-                ? "border-accent bg-accent text-[color:var(--on-accent)] font-semibold"
+                ? "border-transparent text-[color:var(--on-accent)] font-semibold"
                 : "border-border-strong bg-surface text-text-muted hover:bg-surface-elev hover:text-text"
             }`}
+            style={
+              i === active
+                ? { background: "var(--accent-fill)" }
+                : undefined
+            }
           >
             {tab.tag}
           </button>
@@ -216,13 +192,13 @@ export function Showcase() {
           <span
             className={`pill ${
               t.channel === "WhatsApp"
-                ? "border-whatsapp text-whatsapp"
-                : "border-telegram text-telegram"
+                ? "border-[#1da851] text-[#1da851]"
+                : "border-[#2b8fd6] text-[#2b8fd6]"
             }`}
           >
             <span
               className={`inline-block h-1.5 w-1.5 rounded-full ${
-                t.channel === "WhatsApp" ? "bg-whatsapp" : "bg-telegram"
+                t.channel === "WhatsApp" ? "bg-[#1da851]" : "bg-[#2b8fd6]"
               }`}
             />
             {t.channel}
@@ -246,7 +222,7 @@ export function Showcase() {
                     cy="12"
                     r="10"
                     stroke="currentColor"
-                    strokeOpacity="0.4"
+                    strokeOpacity="0.35"
                     strokeWidth="1.5"
                   />
                   <path
