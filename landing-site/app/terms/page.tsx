@@ -168,7 +168,8 @@ export default function TermsPage() {
         and for providing any notices and obtaining any consents required for
         recorded individuals. Cradle Labs&apos; processing of personal data in
         this model is carried out as a processor and is described in our Privacy
-        Policy (Section 3) and the DPA.
+        Policy (Section 3) and our{" "}
+        <a href="/dpa">Data Processing Agreement</a>.
       </p>
       <p>
         <strong>Ownership and intellectual property.</strong> The Overwatch
