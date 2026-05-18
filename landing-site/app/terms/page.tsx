@@ -29,7 +29,6 @@ export default function TermsPage() {
         waitlist, you confirm that you have read, understood and agree to be
         bound by these Terms. If you do not agree, please do not use the Site.
       </p>
-      <p className="callout">[Registered address — confirm]</p>
       <p>
         <strong>Email:</strong>{" "}
         <a href="mailto:hello@dterminal.net">hello@dterminal.net</a>
@@ -195,13 +194,19 @@ export default function TermsPage() {
 
       <h2>12. Governing law and jurisdiction</h2>
       <p>
-        These Terms, and any dispute or claim arising out of or in connection
-        with them, are governed by and construed in accordance with the law
-        stated below, and the courts of that jurisdiction will have exclusive
-        jurisdiction, subject to any mandatory consumer protection rights you
-        may have under local law.
+        These Terms, and any dispute or claim (including non-contractual
+        disputes or claims) arising out of or in connection with them, their
+        subject matter or their formation, shall be governed by and construed
+        in accordance with the laws of the jurisdiction in which Cradle Labs
+        Limited is incorporated.
       </p>
-      <p className="callout">[Governing law: England and Wales — confirm]</p>
+      <p>
+        You and Cradle Labs Limited each irrevocably agree that the courts of
+        that jurisdiction shall have exclusive jurisdiction to hear and
+        determine any such dispute or claim. Nothing in this clause limits or
+        excludes any mandatory statutory rights, including consumer protection
+        rights, available to you under the law of your country of residence.
+      </p>
 
       <h2>13. Contact</h2>
       <p>
@@ -212,7 +217,6 @@ export default function TermsPage() {
         <strong>Email:</strong>{" "}
         <a href="mailto:hello@dterminal.net">hello@dterminal.net</a>
       </p>
-      <p className="callout">[Registered address — confirm]</p>
     </LegalPage>
   );
 }
