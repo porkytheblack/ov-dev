@@ -174,33 +174,22 @@
     @apply my-4;
   }
   .legal ul {
-    @apply my-4 space-y-2 pl-1;
+    @apply my-4 flex flex-col gap-2 pl-6;
+    list-style-type: disc;
+    list-style-position: outside;
   }
   .legal li {
-    @apply flex gap-3;
+    @apply pl-1.5;
+    display: list-item;
   }
-  .legal li::before {
-    content: "";
-    @apply mt-[10px] inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent;
+  .legal li::marker {
+    color: var(--accent);
   }
   .legal strong {
     @apply font-semibold text-text;
   }
   .legal a {
     @apply text-accent underline underline-offset-2;
-  }
-  .legal .lead-note {
-    @apply my-6 text-[14px] italic text-text-dim;
-  }
-  .legal .callout {
-    @apply my-3 flex items-start gap-2 rounded-xl border
-           bg-[color:var(--accent-soft)] px-4 py-3 text-[13px] not-italic
-           text-text;
-    border-color: var(--accent-line);
-  }
-  .legal .callout::before {
-    content: "›";
-    @apply mono font-semibold text-accent;
   }
   .legal table {
     @apply my-5 w-full border-collapse text-[14px];

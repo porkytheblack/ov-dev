@@ -10,12 +10,6 @@ export const metadata: Metadata = {
 export default function PrivacyPolicyPage() {
   return (
     <LegalPage title="Privacy Policy" updated="18 May 2026">
-      <p className="lead-note">
-        This document is provided for general information only and is a
-        template. It does not constitute legal advice. Cradle Labs Limited
-        should have it reviewed and adapted by a qualified lawyer before launch.
-      </p>
-
       <h2>1. Who we are</h2>
       <p>
         This Privacy Policy explains how <strong>Cradle Labs Limited</strong>{" "}

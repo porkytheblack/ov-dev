@@ -10,18 +10,6 @@ export const metadata: Metadata = {
 export default function DpaPage() {
   return (
     <LegalPage title="Data Processing Agreement" updated="18 May 2026">
-      <p className="lead-note">
-        This document is provided for general information only and is a
-        template. It does not constitute legal advice. Cradle Labs Limited
-        should have it reviewed and adapted by a qualified lawyer before it is
-        used or executed. This is a standard form made available in advance of
-        launch; on execution, the signature block, party and notice details,
-        module and option selections, and other Order-specific particulars are
-        completed by the parties in the applicable Order. Capitalised terms used
-        but not defined in this DPA have the meanings given in the Product
-        Terms.
-      </p>
-
       <p>
         This Data Processing Agreement (the <strong>&quot;DPA&quot;</strong>) is
         entered into between <strong>Cradle Labs Limited</strong>
@@ -126,7 +114,9 @@ export default function DpaPage() {
       <p>
         <strong>1.2 Interpretation.</strong> References to Articles are to
         Articles of the UK GDPR and/or EU GDPR as applicable. The Annexes form
-        part of this DPA. Headings are for convenience only.
+        part of this DPA. Headings are for convenience only. Capitalised terms
+        used but not defined in this DPA have the meanings given in the Product
+        Terms.
       </p>
       <p>
         <strong>1.3 Order of precedence.</strong> In the event of any conflict
