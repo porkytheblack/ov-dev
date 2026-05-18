@@ -32,11 +32,11 @@ export function TgBubble({
   return (
     <div className={`flex ${out ? "justify-end" : "justify-start"}`}>
       <div
-        className={`relative max-w-[84%] text-[13.5px] leading-snug text-[#1a1a1a] shadow-sm ${
+        className={`relative text-[13.5px] leading-snug text-[#1a1a1a] shadow-sm ${
           out
             ? "rounded-2xl rounded-br-md bg-[#eeffde]"
             : "rounded-2xl rounded-bl-md bg-white"
-        } ${noPad ? "p-1.5" : "px-3 py-2"}`}
+        } ${noPad ? "w-[248px] max-w-[96%] p-1.5" : "max-w-[84%] px-3 py-2"}`}
       >
         {children}
         <div className="mt-0.5 flex items-center justify-end gap-1">
@@ -85,7 +85,7 @@ export function TgInlineKeyboard() {
 
 export function TgFireCard() {
   return (
-    <div className="w-[230px]">
+    <div className="w-full">
       <CameraFeed
         scene="fire"
         camera="CAM-04 · REAR YARD"
