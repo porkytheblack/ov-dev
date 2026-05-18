@@ -13,7 +13,6 @@ FROM deps AS build
 COPY packages/schemas ./packages/schemas
 COPY packages/shared-ts ./packages/shared-ts
 COPY services/ov-incident-engine ./services/ov-incident-engine
-RUN pnpm --filter @overwatch/ov-incident-engine... build
 
 FROM node:20-alpine AS runtime
 WORKDIR /app

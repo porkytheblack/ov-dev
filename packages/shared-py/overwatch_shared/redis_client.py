@@ -85,8 +85,54 @@ async def consume_group(
     stop_event: asyncio.Event | None = None,
 ) -> None:
     await ensure_group(redis, stream, group)
+
+    async def _process(messages: Any) -> None:
+        for msg_id, fields in messages:
+            try:
+                event = _decode(fields)
+                await handler(event, msg_id)
+            except Exception:
+                pass
+            finally:
+                await redis.xack(stream, group, msg_id)
+
+    # Reclaim messages orphaned by a consumer that died/restarted so events
+    # are never silently dropped. Must NEVER block the main read: throttled
+    # and hard-timeboxed (a hung xautoclaim during a reconnect would
+    # otherwise freeze the consumer — observed killing clip/alert delivery).
+    reclaim_idle_ms = 30_000
+    reclaim_every_s = 30.0
+    reclaim_budget_s = 4.0
+    last_reclaim = 0.0
+
+    async def _reclaim_stale() -> None:
+        cursor = "0-0"
+        for _ in range(5):
+            out = await redis.xautoclaim(
+                stream, group, consumer, reclaim_idle_ms, start_id=cursor, count=count
+            )
+            # Redis >=7 returns (cursor, claimed, deleted); 6.2 returns (cursor, claimed)
+            cursor = out[0]
+            claimed = out[1] if len(out) > 1 else []
+            if claimed:
+                await _process(claimed)
+            if not cursor or cursor in ("0-0", b"0-0"):
+                break
+
+    async def _try_reclaim() -> None:
+        nonlocal last_reclaim
+        now = asyncio.get_event_loop().time()
+        if now - last_reclaim < reclaim_every_s:
+            return
+        last_reclaim = now
+        try:
+            await asyncio.wait_for(_reclaim_stale(), timeout=reclaim_budget_s)
+        except Exception:
+            pass  # timeout / unsupported / transient — keep consuming
+
     while stop_event is None or not stop_event.is_set():
         try:
+            await _try_reclaim()
             res = await redis.xreadgroup(
                 groupname=group,
                 consumername=consumer,
@@ -100,11 +146,4 @@ async def consume_group(
         if not res:
             continue
         for _, messages in res:
-            for msg_id, fields in messages:
-                try:
-                    event = _decode(fields)
-                    await handler(event, msg_id)
-                except Exception:
-                    pass
-                finally:
-                    await redis.xack(stream, group, msg_id)
+            await _process(messages)

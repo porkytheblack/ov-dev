@@ -28,12 +28,20 @@
     }
   }
 
-  # WhatsApp webhook
-  handle /webhook/whatsapp* {
+  # WhatsApp webhook. Tolerate the common /webhooks (plural) typo and any
+  # sub-path by normalising to the canonical path before proxying — Meta
+  # follows no redirects on webhook verify/delivery, so we rewrite, not redir.
+  @whatsapp path /webhook/whatsapp* /webhooks/whatsapp*
+  handle @whatsapp {
+    rewrite * /webhook/whatsapp
     reverse_proxy ov-whatsapp:3010
   }
 
-  # MinIO console (optional)
+  # MinIO console (optional). Bare /minio-console (no trailing slash) would
+  # otherwise fall through to the dashboard 404 — redirect it to the slash.
+  handle /minio-console {
+    redir * /minio-console/ 308
+  }
   handle /minio-console/* {
     reverse_proxy minio:9001
   }

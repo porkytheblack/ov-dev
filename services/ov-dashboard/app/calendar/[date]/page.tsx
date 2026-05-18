@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { Nav } from "@/components/Nav";
 import { StatusPill } from "@/components/StatusPill";
 import { ClipModal, type ClipIncident } from "@/components/ClipModal";
@@ -16,8 +16,18 @@ function shiftDay(date: string, delta: number): string {
 }
 
 export default function CalendarDayPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen" />}>
+      <CalendarDayInner />
+    </Suspense>
+  );
+}
+
+function CalendarDayInner() {
   const params = useParams<{ date: string }>();
   const date = params.date; // YYYY-MM-DD
+  // Recap deep links land here scoped to one camera (?camera=<id>).
+  const cameraId = useSearchParams().get("camera");
   const [incidents, setIncidents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<ClipIncident | null>(null);
@@ -44,28 +54,45 @@ export default function CalendarDayPage() {
     };
   }, [date]);
 
-  // Group by camera, ordered earliest-incident-first so columns are stable.
+  // Group by camera; each camera's column is a reverse-chronological feed
+  // (newest → oldest), and columns are ordered by most-recent activity.
+  // Scope to one camera when arriving from a recap deep link.
+  const scoped = useMemo(
+    () =>
+      cameraId ? incidents.filter((i) => i.camera_id === cameraId) : incidents,
+    [incidents, cameraId],
+  );
+  const scopedCameraName = cameraId
+    ? (scoped[0]?.camera_name ??
+      incidents.find((i) => i.camera_id === cameraId)?.camera_name ??
+      null)
+    : null;
+
   const columns = useMemo(() => {
     const m = new Map<string, any[]>();
-    for (const i of [...incidents].sort(
-      (a, b) =>
-        new Date(a.opened_at).getTime() - new Date(b.opened_at).getTime(),
-    )) {
+    for (const i of scoped) {
       const k = i.camera_name ?? "Unknown camera";
       (m.get(k) ?? m.set(k, []).get(k))!.push(i);
     }
-    return Array.from(m.entries());
-  }, [incidents]);
+    const desc = (a: any, b: any) =>
+      new Date(b.opened_at).getTime() - new Date(a.opened_at).getTime();
+    for (const [, items] of m) items.sort(desc);
+    return Array.from(m.entries()).sort(
+      ([, a], [, b]) => desc(a[0], b[0]),
+    );
+  }, [scoped]);
 
   const title = (() => {
     const d = new Date(`${date}T00:00:00`);
-    if (Number.isNaN(d.getTime())) return date;
-    return d.toLocaleDateString("en-US", {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    });
+    const ds = Number.isNaN(d.getTime())
+      ? date
+      : d.toLocaleDateString("en-US", {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        });
+    return scopedCameraName ? `${ds} · ${scopedCameraName}` : ds;
   })();
 
   return (
@@ -87,10 +114,10 @@ export default function CalendarDayPage() {
             <p className="text-text-dim text-[13px] mt-0.5">
               {loading
                 ? "Loading incidents…"
-                : incidents.length === 0
+                : scoped.length === 0
                   ? "No incidents this day"
-                  : `${incidents.length} incident${
-                      incidents.length !== 1 ? "s" : ""
+                  : `${scoped.length} incident${
+                      scoped.length !== 1 ? "s" : ""
                     } across ${columns.length} camera${
                       columns.length !== 1 ? "s" : ""
                     }`}
@@ -128,7 +155,7 @@ export default function CalendarDayPage() {
         )}
 
         {/* Empty */}
-        {!loading && incidents.length === 0 && (
+        {!loading && scoped.length === 0 && (
           <div className="card flex flex-col items-center text-center py-12 gap-2">
             <p className="text-text-muted">Nothing was detected on this day.</p>
             <Link href="/calendar" className="btn-ghost text-[13px] mt-1">
@@ -138,7 +165,7 @@ export default function CalendarDayPage() {
         )}
 
         {/* Camera columns */}
-        {!loading && incidents.length > 0 && (
+        {!loading && scoped.length > 0 && (
           <div className="flex gap-4 overflow-x-auto pb-3">
             {columns.map(([camera, items], ci) => (
               <section

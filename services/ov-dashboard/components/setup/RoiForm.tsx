@@ -90,6 +90,31 @@ export function RoiForm({
       </div>
 
       <div className="field">
+        <span className="label">Region type</span>
+        <ToggleGroup>
+          {[
+            { v: "include" as const, t: "Detect zone" },
+            { v: "exclude" as const, t: "Exclusion (ignore)" },
+          ].map((o) => (
+            <ToggleChip
+              key={o.v}
+              active={draft.kind === o.v}
+              onClick={() => setDraft({ kind: o.v })}
+            >
+              {o.t}
+            </ToggleChip>
+          ))}
+        </ToggleGroup>
+        <span className="text-text-dim text-[10px]">
+          {draft.kind === "exclude"
+            ? "Anything detected inside this area is ignored — e.g. a tall tree mistaken for a person in bad light. No incidents or fire alerts from here, ever."
+            : "A normal region of interest — incidents fire for the classes below."}
+        </span>
+      </div>
+
+      {draft.kind === "include" ? (
+        <>
+      <div className="field">
         <span className="label">Classes of interest</span>
         <ToggleGroup wrap>
           {classList.map((cls) => (
@@ -254,6 +279,8 @@ export function RoiForm({
           </span>
         </label>
       </div>
+        </>
+      ) : null}
 
       {error && <div className="mono text-[11px] text-danger">{error}</div>}
 

@@ -22,3 +22,6 @@ volumes/
 *.swp
 .idea/
 .vscode/
+
+# Claude Code transient runtime artifacts (skills/ are tracked intentionally)
+.claude/scheduled_tasks.lock

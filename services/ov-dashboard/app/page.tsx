@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { Nav } from "@/components/Nav";
 import { StatusPill } from "@/components/StatusPill";
+import { IncidentFeed } from "@/components/IncidentFeed";
 import { api } from "@/lib/api";
 import { formatRelative } from "@/lib/format";
 import Link from "next/link";
@@ -98,40 +99,10 @@ export default async function Page() {
             <Link href="/incidents" className="btn">View all incidents</Link>
           </div>
 
-          <div className="card p-0">
-            <table className="ov">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Camera</th>
-                  <th>Detected</th>
-                  <th>Status</th>
-                  <th>Summary</th>
-                </tr>
-              </thead>
-              <tbody>
-                {incidents.incidents.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="text-text-muted text-center py-8">
-                      No incidents recorded yet. The system is monitoring for activity.
-                    </td>
-                  </tr>
-                ) : (
-                  incidents.incidents.map((i: any) => (
-                    <tr key={i.id}>
-                      <td className="mono whitespace-nowrap">{formatRelative(i.opened_at)}</td>
-                      <td>{i.camera_name}</td>
-                      <td className="mono text-text-muted">
-                        {(i.classes ?? []).length > 0 ? (i.classes ?? []).join(", ") : "—"}
-                      </td>
-                      <td><StatusPill status={i.status} /></td>
-                      <td className="max-w-xs truncate text-text-muted">{i.summary ?? "—"}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <IncidentFeed
+            incidents={incidents.incidents}
+            emptyText="No incidents recorded yet. The system is monitoring for activity."
+          />
         </section>
       </main>
     </>

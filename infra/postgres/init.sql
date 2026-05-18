@@ -48,8 +48,13 @@ CREATE TABLE IF NOT EXISTS rois (
   classes_of_interest TEXT[] NOT NULL,
   match_mode TEXT NOT NULL DEFAULT 'centroid',
   detection_window JSONB NOT NULL DEFAULT '{"type":"always"}'::jsonb,
-  linger_threshold_seconds INT NOT NULL DEFAULT 60,
+  linger_threshold_seconds INT NOT NULL DEFAULT 3,
   notify_enabled BOOLEAN NOT NULL DEFAULT true,
+  -- 'include' = a normal region of interest; 'exclude' = an ignore zone
+  -- (any detection whose centroid falls inside is dropped before it can
+  -- open an incident or raise a fire alert, e.g. a tree mis-IDed as a
+  -- person in bad light).
+  kind TEXT NOT NULL DEFAULT 'include',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -219,3 +224,26 @@ ALTER TABLE incidents ADD CONSTRAINT incidents_camera_id_fkey
 ALTER TABLE incidents DROP CONSTRAINT IF EXISTS incidents_roi_id_fkey;
 ALTER TABLE incidents ADD CONSTRAINT incidents_roi_id_fkey
   FOREIGN KEY (roi_id) REFERENCES rois(id) ON DELETE CASCADE;
+
+-- Glove conversation store: token / turn counters live alongside the
+-- message history so the agent keeps stats across messenger turns.
+ALTER TABLE agent_conversations ADD COLUMN IF NOT EXISTS tokens_in BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE agent_conversations ADD COLUMN IF NOT EXISTS tokens_out BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE agent_conversations ADD COLUMN IF NOT EXISTS turns INT NOT NULL DEFAULT 0;
+
+-- Glove inbox: notifications posted while the operator was away. The agent
+-- auto-surfaces status='resolved' rows on the next message, then marks them
+-- 'consumed'. Written by ov-notifier, read by ov-agent's store.
+CREATE TABLE IF NOT EXISTS agent_inbox (
+  id          TEXT PRIMARY KEY,
+  channel     TEXT NOT NULL,
+  handle      TEXT NOT NULL,
+  tag         TEXT NOT NULL,
+  request     TEXT NOT NULL,
+  response    TEXT,
+  status      TEXT NOT NULL DEFAULT 'pending',
+  blocking    BOOLEAN NOT NULL DEFAULT false,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_agent_inbox_scope ON agent_inbox (channel, handle, status);

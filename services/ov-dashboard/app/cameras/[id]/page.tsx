@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { Nav } from "@/components/Nav";
 import { StatusPill } from "@/components/StatusPill";
 import { LiveViewer } from "@/components/LiveViewer";
+import { IncidentFeed } from "@/components/IncidentFeed";
 import { formatRelative } from "@/lib/format";
 
 export default function CameraPage() {
@@ -88,42 +89,10 @@ export default function CameraPage() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-[16px] font-semibold">Recent incidents on this camera</h2>
           </div>
-          <div className="card p-0">
-            <table className="ov">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Detected</th>
-                  <th>Status</th>
-                  <th>Summary</th>
-                </tr>
-              </thead>
-              <tbody>
-                {incidents.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="text-text-muted text-center py-8">
-                      No incidents recorded for this camera yet.
-                    </td>
-                  </tr>
-                ) : (
-                  incidents.map((i: any) => (
-                    <tr key={i.id}>
-                      <td className="mono whitespace-nowrap">
-                        <Link href={`/incidents/${i.id}`} className="hover:text-accent transition-colors">
-                          {formatRelative(i.opened_at)}
-                        </Link>
-                      </td>
-                      <td className="mono text-text-muted">
-                        {(i.classes ?? []).length > 0 ? (i.classes ?? []).join(", ") : "—"}
-                      </td>
-                      <td><StatusPill status={i.status} /></td>
-                      <td className="text-text-muted max-w-xs truncate">{i.summary ?? "—"}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <IncidentFeed
+            incidents={incidents}
+            emptyText="No incidents recorded for this camera yet."
+          />
         </section>
       </main>
     </>

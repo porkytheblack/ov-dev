@@ -165,6 +165,11 @@ def _build_prompt(ctx: dict) -> str:
 
 
 async def handle_clip_ready(event: dict, _msg_id: str) -> None:
+    # The Mimo/Station vision pipeline (ov-station) is the default summarizer.
+    # This legacy local-VLM path only runs when explicitly selected, so the
+    # two never double-write incidents.summary.
+    if os.environ.get("VISION_BACKEND", "mimo").lower() != "local":
+        return
     if event.get("type") != "clip.ready" or event.get("kind") != "incident":
         return
     iid = event.get("incident_id")

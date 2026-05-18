@@ -33,7 +33,12 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     networks: [overwatch]
-    command: redis-server /etc/redis/redis.conf
+    # Self-heal a partial/corrupt AOF on boot (e.g. after a hard host
+    # reboot) so Redis doesn't crash-loop and the event bus stays up.
+    command:
+      - sh
+      - -c
+      - 'if [ -f /data/appendonlydir/appendonly.aof.manifest ]; then yes | redis-check-aof --fix /data/appendonlydir/appendonly.aof.manifest || true; fi; exec redis-server /etc/redis/redis.conf'
     volumes:
       - redis-data:/data
       - ./infra/redis/redis.conf:/etc/redis/redis.conf:ro
@@ -51,6 +56,11 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_USER:-overwatch}
       MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-overwatch-secret}
+    # Exposed for inspection (Caddy doesn't proxy these): 9000 = S3 API,
+    # 9001 = web console. Log in with MINIO_USER / MINIO_PASSWORD.
+    ports:
+      - "9000:9000"
+      - "9001:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -164,6 +174,36 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+
+  # Signal + broadcast runners + the Redis clip→broadcast bridge (execution).
+  ov-station:
+    build:
+      context: .
+      dockerfile: services/ov-station/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  # Station v1 HTTP API + dashboard + runners (station-kit 1.1.0 CLI,
+  # runRunners:true). Serves trigger-broadcast / run status / API-key
+  # management and executes signals + broadcasts. Key + log stores are
+  # Postgres-backed (no SQLite / volume). Port 4400 exposed for inspection
+  # (the dashboard UI + API; log in with STATION_DASHBOARD_USER/PASSWORD).
+  ov-station-api:
+    build:
+      context: .
+      dockerfile: services/ov-station/Dockerfile
+    restart: unless-stopped
+    networks: [overwatch]
+    env_file: [.env]
+    command: ["pnpm", "dashboard"]
+    ports:
+      - "4400:4400"
+    depends_on:
+      postgres: { condition: service_healthy }
 
   ov-whatsapp:
     build:

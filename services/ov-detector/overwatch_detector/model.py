@@ -7,6 +7,7 @@ weights are present, so the rest of the stack can be exercised without a GPU.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import threading
 from typing import Any
@@ -47,6 +48,21 @@ class Detector:
         # Smaller inference size = faster CPU inference. 480 keeps people
         # detectable while roughly halving compute vs the 640 default.
         self.imgsz = int(os.environ.get("IMGSZ", "480"))
+        # Class disqualification: COCO classes that can't plausibly occur in
+        # a residential compound and are usually the model hallucinating on
+        # fences/structures (e.g. "boat"). Dropped here so no wrong bbox is
+        # ever drawn (overlay), persisted, or sent to the incident engine.
+        # Override with DETECT_DENY_CLASSES (comma-separated, lowercase).
+        # Conservative default: the classes the operator named (boat/sheep/
+        # cow) plus wild/aviation classes that are *only* ever the model
+        # erring in a yard. Plausible ones (truck, bus, dog, cat, bird=
+        # chicken, horse) are NOT denied — extend via env if wanted.
+        _default_deny = "boat,sheep,cow,airplane,train,elephant,bear,zebra,giraffe"
+        self.deny = {
+            c.strip().lower()
+            for c in os.environ.get("DETECT_DENY_CLASSES", _default_deny).split(",")
+            if c.strip()
+        }
         self._lock = threading.Lock()
         self._load_attempted = False
         self._load_error: str | None = None
@@ -120,6 +136,9 @@ class Detector:
         for i in range(len(xyxy)):
             x1, y1, x2, y2 = xyxy[i]
             class_name = names[int(cls[i])] if int(cls[i]) < len(names) else str(int(cls[i]))
+            # Disqualified class → drop entirely (no bbox drawn anywhere).
+            if str(class_name).lower() in self.deny:
+                continue
             d = {
                 "class": class_name,
                 "confidence": float(confs[i]),
@@ -136,4 +155,124 @@ class Detector:
         return out
 
 
+class FireDetector:
+    """Second, independent Ultralytics model dedicated to fire/smoke.
+
+    Runs alongside (not instead of) the COCO detector so person/vehicle
+    detection is unaffected. It is invoked on a throttled cadence by the
+    consumer (fire/smoke evolve over seconds, not frames), which bounds the
+    extra CPU cost — the explicit reason we do NOT use the VLM here.
+
+    The weights are the user-provided Ultralytics fire model
+    (HF SalahALHaismawi/yolov26-fire-detection, classes fire/smoke/other,
+    MIT). If the file is absent it is fetched once into the persistent
+    /models volume. Any failure disables fire detection without ever
+    breaking the working COCO path.
+    """
+
+    def __init__(self) -> None:
+        self.enabled = os.environ.get("FIRE_DETECTION", "1") not in ("0", "false", "")
+        self.model: Any = None
+        self.device = os.environ.get("DEVICE", "cpu")
+        self.model_path = os.environ.get("FIRE_MODEL_PATH", "/models/fire.pt")
+        self.model_url = os.environ.get(
+            "FIRE_MODEL_URL",
+            "https://huggingface.co/SalahALHaismawi/yolov26-fire-detection/resolve/main/best.pt",
+        )
+        self.conf_threshold = float(os.environ.get("FIRE_CONFIDENCE_THRESHOLD", "0.50"))
+        self.iou_threshold = float(os.environ.get("FIRE_IOU_THRESHOLD", "0.45"))
+        self.imgsz = int(os.environ.get("FIRE_IMGSZ", "512"))
+        # fire/smoke only by default; "other" is noisy.
+        self.keep = {
+            c.strip().lower()
+            for c in os.environ.get("FIRE_CLASSES", "fire,smoke").split(",")
+            if c.strip()
+        }
+        self._lock = threading.Lock()
+        self._load_attempted = False
+        self.load_error: str | None = None
+
+    def _ensure_weights(self) -> None:
+        if os.path.exists(self.model_path) or not self.model_url:
+            return
+        import tempfile
+        import urllib.request
+
+        os.makedirs(os.path.dirname(self.model_path) or "/models", exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self.model_path) or "/models")
+        os.close(fd)
+        try:
+            urllib.request.urlretrieve(self.model_url, tmp)  # noqa: S310
+            os.replace(tmp, self.model_path)  # atomic
+        except Exception:
+            with contextlib.suppress(Exception):
+                os.remove(tmp)
+            raise
+
+    def _try_load(self) -> None:
+        if self._load_attempted or not self.enabled:
+            return
+        self._load_attempted = True
+        try:
+            self._ensure_weights()
+            from ultralytics import YOLO  # type: ignore
+
+            self.model = YOLO(self.model_path)
+        except Exception as e:  # never break the detector
+            self.load_error = str(e)
+            self.model = None
+            self.enabled = False
+
+    @property
+    def ready(self) -> bool:
+        self._try_load()
+        return self.model is not None
+
+    def detect(self, image: np.ndarray, camera_id: str) -> list[dict]:
+        if not self.enabled:
+            return []
+        self._try_load()
+        if self.model is None:
+            return []
+        h, w = image.shape[:2]
+        with self._lock:
+            results = self.model.predict(
+                image,
+                conf=self.conf_threshold,
+                iou=self.iou_threshold,
+                imgsz=self.imgsz,
+                device=self.device,
+                verbose=False,
+            )
+        out: list[dict] = []
+        if not results or results[0].boxes is None:
+            return out
+        r = results[0]
+        boxes = r.boxes
+        xyxy = boxes.xyxy.cpu().numpy() if hasattr(boxes.xyxy, "cpu") else np.asarray(boxes.xyxy)
+        confs = boxes.conf.cpu().numpy() if hasattr(boxes.conf, "cpu") else np.asarray(boxes.conf)
+        cls = boxes.cls.cpu().numpy() if hasattr(boxes.cls, "cpu") else np.asarray(boxes.cls)
+        names = r.names if hasattr(r, "names") else {}
+        for i in range(len(xyxy)):
+            x1, y1, x2, y2 = xyxy[i]
+            raw = names[int(cls[i])] if int(cls[i]) in names else str(int(cls[i]))
+            name = str(raw).lower()
+            if self.keep and name not in self.keep:
+                continue
+            out.append(
+                {
+                    "class": name,
+                    "confidence": float(confs[i]),
+                    "bbox": {
+                        "x": float(x1 / w),
+                        "y": float(y1 / h),
+                        "w": float((x2 - x1) / w),
+                        "h": float((y2 - y1) / h),
+                    },
+                }
+            )
+        return out
+
+
 detector_singleton = Detector()
+fire_detector_singleton = FireDetector()

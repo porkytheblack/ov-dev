@@ -14,6 +14,7 @@ import postgres from "postgres";
 export async function renderMediamtxYml(sql: ReturnType<typeof postgres>): Promise<string> {
   const rows = await sql<Array<{ id: string; rtsp_url: string; stream_fps: number | null }>>`
     SELECT id, rtsp_url, stream_fps FROM cameras WHERE enabled = true
+     ORDER BY id
   `;
 
   // Per-camera transcode pipeline. We don't use $MTX_PATH substitution
