@@ -340,7 +340,7 @@ export async function analyzeWithMimoVision(
   );
 }
 
-export type FireVerdict = "fire" | "false_alarm" | "undetermined";
+export type FireVerdict = "fire" | "false_alarm" | "unavailable";
 
 export interface FireClassifyRequest {
   /** A publicly reachable URL or a `data:` image URI of the suspect frame. */
@@ -394,11 +394,17 @@ const FIRE_VERDICT_TOOL = {
  * Shows the suspect frame to the Mimo vision model and asks for a strict
  * yes/no verdict via a forced `fire_verdict` tool call.
  *
- * NEVER throws. Not-configured / timeout / transport error / refusal / any
- * unparseable response all resolve to `"undetermined"` — the caller
- * fail-opens on that (alerts anyway), so a real fire is never silently
- * dropped because the model was unavailable. Only an explicit, parsed
- * `is_fire:false` yields `"false_alarm"` (the one outcome that suppresses).
+ * NEVER throws. Three outcomes:
+ *   - `"fire"`         — model affirmatively confirmed fire/smoke
+ *   - `"false_alarm"`  — model affirmatively said NO fire
+ *   - `"unavailable"`  — could not get a real verdict (not configured,
+ *                        transport error, timeout, non-OK status, refusal,
+ *                        unparseable). The adjudicator did not actually
+ *                        judge the image.
+ * The caller decides what `"unavailable"` means: per the operator's choice
+ * the uncertain band SUPPRESSES on unavailable (no spam while MiMo is
+ * unreachable), while high-confidence fire still alerts engine-direct,
+ * independent of MiMo. Behaviour auto-resumes once MiMo is reachable.
  */
 export async function classifyFireWithMimo(
   req: FireClassifyRequest,
@@ -407,7 +413,7 @@ export async function classifyFireWithMimo(
   try {
     const cfg = resolveMimoConfig("vision", overrides);
     if (!cfg.apiKey) {
-      return { verdict: "undetermined", reason: "mimo vision not configured" };
+      return { verdict: "unavailable", reason: "mimo vision not configured" };
     }
     const baseURL = (cfg.baseURL || MIMO_DEFAULT_BASE_URL).replace(/\/+$/, "");
     // A fire can't wait two minutes for a verdict — use a tight timeout and
@@ -474,7 +480,7 @@ export async function classifyFireWithMimo(
     }
     if (!r.ok) {
       return {
-        verdict: "undetermined",
+        verdict: "unavailable",
         reason: `mimo vision ${r.status}`,
       };
     }
@@ -511,21 +517,20 @@ export async function classifyFireWithMimo(
         /* unparseable tool args → fall through to undetermined */
       }
     }
-    // No usable tool call. If the model free-texted a clear refusal or
-    // anything else, stay undetermined so the caller fail-opens.
+    // No usable tool call — the model didn't actually return a verdict.
     const textOut = (msg?.content ?? "").trim();
     return {
-      verdict: "undetermined",
+      verdict: "unavailable",
       reason:
         textOut && REFUSAL_RE.test(textOut)
           ? "model refused"
           : "no usable verdict",
     };
   } catch (e) {
-    // Abort (timeout), network, JSON — anything. Fail-open.
+    // Abort (timeout) / network / JSON — adjudicator did not judge.
     return {
-      verdict: "undetermined",
-      reason: (e as Error).name === "AbortError" ? "verdict timed out" : "verdict error",
+      verdict: "unavailable",
+      reason: (e as Error).name === "AbortError" ? "verdict timed out" : "transport error",
     };
   }
 }
