@@ -1,5 +1,16 @@
-import { FrameDetections, IncidentClosed, IncidentOpened, STREAMS } from "@overwatch/schemas/events";
-import { createGroupConsumer, makeLogger, makeRedis, publishEvent } from "@overwatch/shared-ts";
+import {
+  FrameDetections,
+  IncidentClosed,
+  IncidentOpened,
+  STREAMS,
+} from "@overwatch/schemas/events";
+import {
+  createGroupConsumer,
+  dispatchFireAlert,
+  makeLogger,
+  makeRedis,
+  publishEvent,
+} from "@overwatch/shared-ts";
 import postgres from "postgres";
 import { v4 as uuid } from "uuid";
 import { IncidentStore } from "./incident-store.js";
@@ -31,14 +42,24 @@ function minConfidence(cls: string): number {
 // it must alert REGARDLESS of ROI / detection window / linger — an
 // unattended fire isn't in a "zone" and can't wait. It's intentionally
 // decoupled from the incident table (incidents.roi_id is NOT NULL and a
-// fire has no ROI): a throttled alert goes straight to subscribers via the
-// existing bot_outbox the messengers already consume.
+// fire has no ROI). Two tiers, by the fire model's own confidence:
+//   - >= FIRE_HIGH_CONF  → alert straight to subscribers (engine-direct,
+//     no Station/vision dependency on the most urgent case)
+//   - CONF_FIRE..HIGH    → publish `fire.review`; the vision adjudicator
+//     decides false-alarm vs real before any alert (kills the red-bicycle-
+//     as-fire class of FPs). Fail-open: if it can't decide, it alerts.
+// The once-per-cooldown-per-camera limit is enforced in Postgres (shared
+// dispatchFireAlert) so it holds across restarts and across both tiers.
 const FIRE_CLASSES = new Set(["fire", "smoke"]);
 const CONF_FIRE = parseFloat(process.env.OV_CONFIDENCE_FIRE ?? "0.6") || 0.6;
-const FIRE_COOLDOWN_MS =
-  (parseInt(process.env.OV_FIRE_ALERT_COOLDOWN_SEC ?? "300") || 300) * 1000;
-// Temporal persistence: a single false-positive frame must NEVER alert.
-// Require ≥ MIN_HITS fire detections within WINDOW before dispatching. The
+// At/above this the detection is trusted enough to alert without the vision
+// second-opinion; below it (but >= CONF_FIRE) it goes for adjudication.
+const FIRE_HIGH_CONF = parseFloat(process.env.OV_FIRE_HIGH_CONF ?? "0.9") || 0.9;
+// One fire alert per camera per this window (DB-persisted, survives restart).
+const FIRE_COOLDOWN_SEC =
+  parseInt(process.env.OV_FIRE_ALERT_COOLDOWN_SEC ?? "3600", 10) || 3600;
+// Temporal persistence: a single false-positive frame must NEVER act (alert
+// OR adjudicate). Require ≥ MIN_HITS fire detections within WINDOW first. The
 // detector runs fire ~every 5s, so 3-in-40s ≈ ~15s of sustained fire —
 // real fire still alerts fast; flicker FPs (tree/sky/lighting) don't.
 const FIRE_MIN_HITS = parseInt(process.env.OV_FIRE_MIN_HITS ?? "3", 10) || 3;
@@ -56,7 +77,8 @@ export class IncidentEngine {
   private incidents = new OpenIncidents();
   private roiCache: RoiCache;
   private store: IncidentStore;
-  private fireCooldown = new Map<string, number>();
+  // Sustained-presence tracker (in-memory, ~40s window — restart-tolerance
+  // not needed). The actual once-per-camera alert limit is DB-persisted.
   private fireHits = new Map<string, number[]>();
   private cameraConsumers = new Map<string, AbortController>();
   private stop = false;
@@ -173,10 +195,15 @@ export class IncidentEngine {
       (d) => FIRE_CLASSES.has(d.class) && d.confidence >= CONF_FIRE,
     );
     if (fire.length > 0) {
-      await this.alertFire(
+      const classes = [...new Set(fire.map((f) => f.class))];
+      const maxConf = Math.max(...fire.map((f) => f.confidence));
+      await this.handleFire(
         event.camera_id,
-        [...new Set(fire.map((f) => f.class))],
-      ).catch((e) => log.error({ err: e }, "fire alert failed"));
+        classes,
+        maxConf,
+        event.frame_key,
+        event.ts,
+      ).catch((e) => log.error({ err: e }, "fire handling failed"));
     }
     for (const roi of rois) {
       if (roi.kind === "exclude") continue;
@@ -243,49 +270,67 @@ export class IncidentEngine {
   }
 
   /**
-   * Urgent fire/smoke alert straight to subscribers (bypasses the incident
-   * table — fire has no ROI). Throttled per camera so a sustained fire
-   * doesn't spam; in-memory cooldown errs toward alerting on restart.
+   * Sustained fire/smoke handler (bypasses the incident table — fire has no
+   * ROI). Requires sustained presence so one false-positive frame can never
+   * act, then routes by the fire model's confidence:
+   *   - >= FIRE_HIGH_CONF → alert straight to subscribers (engine-direct,
+   *     rate-limited in Postgres so it can't spam even across restarts)
+   *   - below that         → hand to the vision adjudicator via `fire.review`
+   *     (it confirms real vs false-alarm, and fail-opens to an alert if it
+   *     cannot decide). The retained frame key rides along.
    */
-  private async alertFire(cameraId: string, classes: string[]): Promise<void> {
+  private async handleFire(
+    cameraId: string,
+    classes: string[],
+    maxConf: number,
+    frameKey: string | undefined,
+    ts: string,
+  ): Promise<void> {
     const now = Date.now();
-    // Record this hit; require sustained presence (≥ FIRE_MIN_HITS within
-    // FIRE_WINDOW_MS) so one false-positive frame can't raise an alarm.
+    // Require sustained presence (≥ FIRE_MIN_HITS within FIRE_WINDOW_MS)
+    // before acting at all — neither alert NOR adjudicate on one stray frame.
     const hits = (this.fireHits.get(cameraId) ?? []).filter(
       (t) => now - t < FIRE_WINDOW_MS,
     );
     hits.push(now);
     this.fireHits.set(cameraId, hits);
     if (hits.length < FIRE_MIN_HITS) return; // not yet sustained
-    const last = this.fireCooldown.get(cameraId) ?? 0;
-    if (now - last < FIRE_COOLDOWN_MS) return;
-    this.fireCooldown.set(cameraId, now);
     this.fireHits.set(cameraId, []); // reset; needs fresh persistence next time
 
-    const cam = await this.sql<Array<{ name: string }>>`
-      SELECT name FROM cameras WHERE id = ${cameraId}::uuid LIMIT 1
-    `;
-    const cameraName = cam[0]?.name ?? "a camera";
-    const subs = await this.sql<Array<{ channel: string; handle: string }>>`
-      SELECT channel, handle FROM subscribers
-       WHERE enabled = true
-         AND channel IN ('whatsapp', 'telegram')
-         AND (cardinality(camera_ids) = 0 OR ${cameraId}::uuid = ANY(camera_ids))
-    `;
-    const what = classes.join(" & ");
-    const text =
-      `🔥 FIRE ALERT — ${cameraName}\n` +
-      `${what.charAt(0).toUpperCase()}${what.slice(1)} detected on camera. ` +
-      `Check the live view and respond immediately.`;
-    for (const s of subs) {
-      if (s.channel !== "telegram" && s.channel !== "whatsapp") continue;
-      await publishEvent(
-        this.redis,
-        STREAMS.bot_outbox(s.channel as "telegram" | "whatsapp"),
-        { type: "bot.outbox", channel: s.channel, handle: s.handle, text },
-      ).catch((e) => log.error({ err: e }, "fire bot_outbox publish failed"));
+    if (maxConf >= FIRE_HIGH_CONF) {
+      // High confidence — alert directly, no Station/vision dependency on
+      // the most urgent case. The DB claim enforces ≤1/camera/cooldown.
+      const r = await dispatchFireAlert(this.sql, this.redis, {
+        cameraId,
+        classes,
+        cooldownSec: FIRE_COOLDOWN_SEC,
+      });
+      log.warn(
+        { cameraId, classes, maxConf, sent: r.sent, subscribers: r.subscribers },
+        r.sent
+          ? "FIRE alert dispatched (high-confidence, direct)"
+          : "FIRE alert suppressed (within per-camera cooldown)",
+      );
+      return;
     }
-    log.warn({ cameraId, cameraName, classes, subscribers: subs.length }, "FIRE alert dispatched");
+
+    // Uncertain band — let the vision model adjudicate before alerting.
+    const review: Record<string, unknown> = {
+      type: "fire.review",
+      camera_id: cameraId,
+      classes,
+      confidence: maxConf,
+      high_confidence: false,
+      ts,
+    };
+    if (frameKey) review.frame_key = frameKey;
+    await publishEvent(this.redis, STREAMS.fire_review, review).catch((e) =>
+      log.error({ err: e, cameraId }, "fire.review publish failed"),
+    );
+    log.warn(
+      { cameraId, classes, maxConf, hasFrame: !!frameKey },
+      "fire below high-confidence bar — sent for vision adjudication",
+    );
   }
 
   private async sweepLoop(): Promise<void> {

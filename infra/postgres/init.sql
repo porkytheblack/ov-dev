@@ -247,3 +247,13 @@ CREATE TABLE IF NOT EXISTS agent_inbox (
   resolved_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_agent_inbox_scope ON agent_inbox (channel, handle, status);
+
+-- Fire-alert rate limiter: at most one fire alert per camera per cooldown
+-- window, persisted so a service restart can't re-trigger inside the window.
+-- Claimed atomically by the shared dispatchFireAlert (engine high-confidence
+-- path AND the Station adjudicated path). shared-ts also ensures this at
+-- runtime; kept here so fresh installs have it from the start.
+CREATE TABLE IF NOT EXISTS fire_alert_log (
+  camera_id     UUID PRIMARY KEY,
+  last_alert_at TIMESTAMPTZ NOT NULL
+);
