@@ -48,9 +48,9 @@ export function WaBubble({
   return (
     <div className={`flex ${out ? "justify-end" : "justify-start"}`}>
       <div
-        className={`relative max-w-[82%] rounded-lg text-[13.5px] leading-snug text-[#111b21] shadow-sm ${
+        className={`relative rounded-lg text-[13.5px] leading-snug text-[#111b21] shadow-sm ${
           out ? "rounded-tr-none bg-[#d9fdd3]" : "rounded-tl-none bg-white"
-        } ${noPad ? "p-1.5" : "px-2.5 py-1.5"}`}
+        } ${noPad ? "w-[248px] max-w-[96%] p-1.5" : "max-w-[82%] px-2.5 py-1.5"}`}
       >
         {children}
         <div className="mt-0.5 flex items-center justify-end gap-1 pr-0.5">
@@ -64,7 +64,7 @@ export function WaBubble({
 
 export function WaIncidentCard() {
   return (
-    <div className="w-[224px]">
+    <div className="w-full">
       <CameraFeed
         scene="gate"
         camera="CAM-01 · FRONT GATE"

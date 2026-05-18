@@ -28,7 +28,10 @@ export default function PrivacyPolicyPage() {
         Cradle Labs is the controller responsible for your personal information.
       </p>
       <p className="callout">[Registered address — confirm]</p>
-      <p className="callout">[Contact email: hello@ — confirm]</p>
+      <p>
+        <strong>Email:</strong>{" "}
+        <a href="mailto:hello@dterminal.net">hello@dterminal.net</a>
+      </p>
 
       <h2>2. Scope</h2>
       <p>
@@ -254,7 +257,10 @@ export default function PrivacyPolicyPage() {
         For any questions, requests, or to exercise your rights, please contact
         Cradle Labs Limited at:
       </p>
-      <p className="callout">[Contact email: hello@ — confirm]</p>
+      <p>
+        <strong>Email:</strong>{" "}
+        <a href="mailto:hello@dterminal.net">hello@dterminal.net</a>
+      </p>
       <p className="callout">[Registered address — confirm]</p>
       <p className="callout">[Governing law: England and Wales — confirm]</p>
     </LegalPage>

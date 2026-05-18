@@ -13,6 +13,12 @@ export function Footer() {
           <p className="mono mt-4 text-[12px] uppercase tracking-[0.12em] text-text-dim">
             Always watching, always ready.
           </p>
+          <a
+            href="mailto:hello@dterminal.net"
+            className="mono mt-3 inline-block text-[13px] text-text-muted transition-colors duration-150 hover:text-text"
+          >
+            hello@dterminal.net
+          </a>
         </div>
 
         <div className="grid grid-cols-2 gap-x-14 gap-y-2 sm:grid-cols-3">

@@ -30,7 +30,10 @@ export default function TermsPage() {
         bound by these Terms. If you do not agree, please do not use the Site.
       </p>
       <p className="callout">[Registered address — confirm]</p>
-      <p className="callout">[Contact email: hello@ — confirm]</p>
+      <p>
+        <strong>Email:</strong>{" "}
+        <a href="mailto:hello@dterminal.net">hello@dterminal.net</a>
+      </p>
 
       <h2>2. Eligibility</h2>
       <p>
@@ -205,7 +208,10 @@ export default function TermsPage() {
         If you have any questions about these Terms, please contact Cradle Labs
         Limited at:
       </p>
-      <p className="callout">[Contact email: hello@ — confirm]</p>
+      <p>
+        <strong>Email:</strong>{" "}
+        <a href="mailto:hello@dterminal.net">hello@dterminal.net</a>
+      </p>
       <p className="callout">[Registered address — confirm]</p>
     </LegalPage>
   );

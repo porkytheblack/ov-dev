@@ -89,12 +89,12 @@ const tabs: Tab[] = [
           <TypingDots tint="wa" />
           <WaBubble side="in" time="08:02">
             <p>3 incidents in the last hour:</p>
-            <p className="mono mt-1.5 text-[12px] leading-relaxed text-[#3b4a54]">
-              07:14 · Front Gate — person (64s) · ack&apos;d
+            <p className="mono mt-1.5 text-[11px] leading-snug text-[#3b4a54]">
+              07:14 Gate · person · ack&apos;d
               <br />
-              07:31 · West Fence — person · suppressed
+              07:31 Fence · person · supp
               <br />
-              07:55 · Driveway — vehicle + person · closed
+              07:55 Drive · car+person
             </p>
             <p className="mt-1.5">Only 07:14 is worth a look. Want the clip?</p>
           </WaBubble>
@@ -124,20 +124,20 @@ const tabs: Tab[] = [
               [OVERWATCH] Overnight summary
             </p>
             <p className="mono mt-1 text-[11px] text-[#8a9aa5]">
-              22:00 → 06:00 · 4 cameras online
+              22:00→06:00 · 4 cams
             </p>
-            <p className="mono mt-2 text-[12px] leading-relaxed text-[#3b4a54]">
-              Front Gate ···· 2 · both ack&apos;d
+            <p className="mono mt-2 text-[11px] leading-snug text-[#3b4a54]">
+              Front Gate · 2 · ack&apos;d
               <br />
-              West Fence ··· 1 · suppressed
+              West Fence · 1 · suppr.
               <br />
-              Driveway ····· 1 · closed
+              Driveway · 1 · closed
               <br />
-              Rear Yard ···· 0
+              Rear Yard · 0
             </p>
             <p className="mt-2 text-[#1a1a1a]">
-              Quietest night this week. Nothing open. The 02:14 gate visitor is
-              the only clip worth a glance.
+              Quietest night this week. Nothing open — the 02:14 gate visitor
+              is the only clip worth a glance.
             </p>
           </TgBubble>
           <TgBubble side="out" time="07:18">
