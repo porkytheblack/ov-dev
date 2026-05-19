@@ -87,6 +87,22 @@ app.get("/api/clips/by-key/:rest{.+}", async (c) => {
   );
 });
 
+// Public current-frame snapshot — read-only, latest JPEG only. Used by the
+// agent's live-view tool: the bot service fetches it internally over the
+// docker network exactly like clip-by-key/footage. The dashboard live view
+// itself stays auth-gated; this just exposes the freshest frame.
+const publicCameras = makeCameraRoutes(sql);
+app.get("/api/cameras/:id/snapshot", async (c) => {
+  const url = new URL(c.req.url);
+  const sub = url.pathname.replace(/^\/api\/cameras/, "");
+  return publicCameras.fetch(
+    new Request(`http://internal${sub}${url.search}`, {
+      method: c.req.method,
+      headers: c.req.raw.headers,
+    }),
+  );
+});
+
 // Public "calendar portal" for the recap deep links. Verifies the
 // HMAC-signed token (mirrors signCalendarLink in ov-station), mints a
 // dashboard session for the operator, and 302s into the calendar day view
