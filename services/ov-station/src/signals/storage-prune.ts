@@ -14,6 +14,10 @@
  *  3. Orphaned / legacy on-demand footage — `ondemand/*` whose incident no
  *     longer exists, plus the pre-codec-fix HEVC builds (`<id>.mp4` that
  *     aren't the current `<id>.h264.mp4`), which are never served again.
+ *  4. Orphaned frames — the detector deletes each frame after processing,
+ *     but orphans accumulate (consumer lag, restarts, fire-retention paths
+ *     that didn't reach cleanup). Frames must turn over fast; we drop any
+ *     object in `overwatch-frames` older than `FRAMES_RETENTION_MIN`.
  *
  * Conservative by construction: never touches a clip before its policy
  * retention, never touches segments a still-existing recent incident might
@@ -30,6 +34,9 @@ const HARD_HOURS = Number(process.env.SEGMENT_HARD_MAX_HOURS ?? 168) || 168;
 // can always still assemble it (footage window is ~30s; 5min is safe slack).
 const KEEP_MARGIN_S = Number(process.env.SEGMENT_KEEP_MARGIN_SEC ?? 300) || 300;
 const BATCH = Number(process.env.PRUNE_BATCH ?? 2000) || 2000;
+// Frames are touched within seconds of being written (detector consumes from
+// `frames.{camera}` Redis stream). Anything older than this is an orphan.
+const FRAMES_RET_MIN = Number(process.env.FRAMES_RETENTION_MIN ?? 10) || 10;
 
 const minio = makeMinio();
 
@@ -63,7 +70,12 @@ const UUID_RE =
 export const storagePrune = signal("storage-prune")
   .input(z.object({}))
   .output(
-    z.object({ clips: z.number(), segments: z.number(), footage: z.number() }),
+    z.object({
+      clips: z.number(),
+      segments: z.number(),
+      footage: z.number(),
+      frames: z.number(),
+    }),
   )
   .every("30m")
   .withInput({})
@@ -73,6 +85,7 @@ export const storagePrune = signal("storage-prune")
     let clipsRemoved = 0;
     let segsRemoved = 0;
     let footageRemoved = 0;
+    let framesRemoved = 0;
 
     // ── 1. Expired clips (enforce clips.retention_until) ────────────────
     try {
@@ -163,9 +176,45 @@ export const storagePrune = signal("storage-prune")
       log.warn({ err: e }, "footage prune failed");
     }
 
-    if (clipsRemoved || segsRemoved || footageRemoved) {
+    // ── 4. Orphaned frames — anything older than FRAMES_RET_MIN ─────────
+    try {
+      const cutoff = Date.now() - FRAMES_RET_MIN * 60_000;
+      const stale: string[] = [];
+      await new Promise<void>((resolve) => {
+        const stream = minio.listObjectsV2(BUCKETS.frames, "", true);
+        const finish = () => {
+          try {
+            (stream as { destroy?: () => void }).destroy?.();
+          } catch {
+            /* ignore */
+          }
+          resolve();
+        };
+        stream.on("data", (o: { name?: string; lastModified?: Date }) => {
+          const mod = o.lastModified ? o.lastModified.getTime() : 0;
+          if (o.name && mod && mod < cutoff) stale.push(o.name);
+          // Bound enumeration cost too — once we have a batch's worth of
+          // stale keys, stop listing and delete; next tick picks up the rest.
+          if (stale.length >= BATCH) finish();
+        });
+        stream.on("error", () => resolve());
+        stream.on("end", () => resolve());
+      });
+      for (const key of stale) {
+        if (await rm(BUCKETS.frames, key)) framesRemoved++;
+      }
+    } catch (e) {
+      log.warn({ err: e }, "frames prune failed");
+    }
+
+    if (clipsRemoved || segsRemoved || footageRemoved || framesRemoved) {
       log.info(
-        { clips: clipsRemoved, segments: segsRemoved, footage: footageRemoved },
+        {
+          clips: clipsRemoved,
+          segments: segsRemoved,
+          footage: footageRemoved,
+          frames: framesRemoved,
+        },
         "storage pruned",
       );
     }
@@ -173,5 +222,6 @@ export const storagePrune = signal("storage-prune")
       clips: clipsRemoved,
       segments: segsRemoved,
       footage: footageRemoved,
+      frames: framesRemoved,
     };
   });
