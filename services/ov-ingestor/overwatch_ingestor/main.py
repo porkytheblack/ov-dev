@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import subprocess
 
 from fastapi import FastAPI
@@ -116,6 +117,26 @@ async def health() -> dict:
             for cid, w in _workers.items()
         },
     }
+
+
+@app.post("/admin/restart")
+async def admin_restart() -> dict:
+    """Hard self-restart. Used by the camera-health watchdog to recover
+    from per-camera RTSP wedges that the in-process reconnect logic can't
+    clear (e.g. after a transient Docker DNS hiccup leaves some workers
+    stuck while others keep flowing). Docker's restart policy brings the
+    container back with fresh workers + fresh RTSP connections.
+    Internal-network only; no auth. Returns immediately, exits shortly
+    after so the caller's request completes."""
+    log.warning("admin restart requested — exiting (docker will restart us)")
+
+    async def _exit_soon() -> None:
+        # Let this handler return cleanly first.
+        await asyncio.sleep(0.5)
+        os._exit(1)
+
+    asyncio.create_task(_exit_soon())
+    return {"ok": True, "restarting": True}
 
 
 class ProbeRequest(BaseModel):
