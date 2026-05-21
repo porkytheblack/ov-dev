@@ -3,26 +3,34 @@
  * only need the *alert artifacts* (incident clips, their built footage,
  * posters). Everything else is disposable once those exist:
  *
- *  1. Expired clips — enforce the retention the clip-builder already stamps
- *     (`clips.retention_until`: 90d incident / 3d regular). Nothing was
- *     actually deleting these.
+ *  1. Expired clips — enforce `clips.retention_until` for clips that are
+ *     NOT tied to a still-existing incident (kind='regular' background
+ *     recordings, orphaned ondemand stand-ins, etc.). A clip whose
+ *     `incident_id` points at an incident still in the DB — any status,
+ *     including `suppressed` — is preserved indefinitely: suppressed
+ *     alerts are explicitly review material the operator wants to look
+ *     back at, and storage for incident clips is tiny vs. raw segments.
  *  2. Raw segments — the bulk of storage (tens of thousands of objects).
  *     Drop any past `SEGMENT_RETENTION_HOURS` that no existing incident's
  *     review window still overlaps, and ALL segments past a hard cap
  *     `SEGMENT_HARD_MAX_HOURS` (by then the incident clip + on-demand
  *     footage are materialised, so the raw segment is redundant).
- *  3. Orphaned / legacy on-demand footage — `ondemand/*` whose incident no
- *     longer exists, plus the pre-codec-fix HEVC builds (`<id>.mp4` that
- *     aren't the current `<id>.h264.mp4`), which are never served again.
+ *  3. Truly orphaned on-demand footage — `ondemand/*` whose incident no
+ *     longer exists in the DB. We deliberately keep the pre-codec-fix
+ *     legacy `<id>.mp4` builds too (even though the current player only
+ *     serves `<id>.h264.mp4`): for some old incidents the legacy build is
+ *     the only footage ever materialised, and once deleted the modal is
+ *     dead-end. ondemand is tiny (~100MB) — the savings aren't worth the
+ *     irreversible loss.
  *  4. Orphaned frames — the detector deletes each frame after processing,
  *     but orphans accumulate (consumer lag, restarts, fire-retention paths
  *     that didn't reach cleanup). Frames must turn over fast; we drop any
  *     object in `overwatch-frames` older than `FRAMES_RETENTION_MIN`.
  *
- * Conservative by construction: never touches a clip before its policy
- * retention, never touches segments a still-existing recent incident might
- * need, never touches `<id>.h264.mp4` of a live incident. Bounded per run;
- * the schedule drains a large backlog over successive runs.
+ * Conservative by construction: never touches a clip while its incident
+ * still exists, never touches segments a still-existing recent incident
+ * might need, never touches an ondemand build whose incident is alive.
+ * Bounded per run; the schedule drains a large backlog over successive runs.
  */
 import { signal, z } from "station-signal";
 import { BUCKETS, makeMinio } from "@overwatch/shared-ts";
@@ -87,14 +95,23 @@ export const storagePrune = signal("storage-prune")
     let footageRemoved = 0;
     let framesRemoved = 0;
 
-    // ── 1. Expired clips (enforce clips.retention_until) ────────────────
+    // ── 1. Expired clips, but ONLY if their incident no longer exists ──
+    // Suppressed (and any other still-on-disk) incidents are review
+    // material — never auto-delete their footage, even past retention.
     try {
       const expired = await sql<
         Array<{ id: string; storage_key: string; poster_key: string | null }>
       >`
-        SELECT id, storage_key, poster_key
-          FROM clips
-         WHERE retention_until IS NOT NULL AND retention_until < now()
+        SELECT c.id, c.storage_key, c.poster_key
+          FROM clips c
+         WHERE c.retention_until IS NOT NULL
+           AND c.retention_until < now()
+           AND (
+             c.incident_id IS NULL
+             OR NOT EXISTS (
+               SELECT 1 FROM incidents i WHERE i.id = c.incident_id
+             )
+           )
          LIMIT ${BATCH}
       `;
       const goneIds: string[] = [];
@@ -142,17 +159,21 @@ export const storagePrune = signal("storage-prune")
       log.warn({ err: e }, "segment prune failed");
     }
 
-    // ── 3. Orphaned / legacy on-demand footage ─────────────────────────
+    // ── 3. Truly orphaned on-demand footage ─────────────────────────────
+    // Only delete `ondemand/*` whose incident no longer exists in the DB.
+    // We intentionally keep the legacy `<id>.mp4` (non-h264) builds — they
+    // may be the only materialised footage for an old incident and once
+    // gone the review modal is dead-end. Bucket is small (~100MB) so the
+    // savings aren't worth the irreversible loss.
     try {
       const keys = await listKeys(BUCKETS.clips, "ondemand/");
       if (keys.length > 0) {
-        const byId = new Map<string, { key: string; legacy: boolean }[]>();
+        const byId = new Map<string, string[]>();
         for (const key of keys) {
           const m = UUID_RE.exec(key);
           if (!m) continue;
           const id = m[1]!.toLowerCase();
-          const legacy = !m[2]; // not the current `.h264.mp4` build
-          (byId.get(id) ?? byId.set(id, []).get(id)!).push({ key, legacy });
+          (byId.get(id) ?? byId.set(id, []).get(id)!).push(key);
         }
         const ids = [...byId.keys()];
         const alive = new Set(
@@ -163,12 +184,9 @@ export const storagePrune = signal("storage-prune")
           ).map((r) => r.id.toLowerCase()),
         );
         for (const [id, items] of byId) {
-          for (const it of items) {
-            // Delete if the incident is gone, or it's a superseded legacy
-            // (non-h264) build that's never served again.
-            if (!alive.has(id) || it.legacy) {
-              if (await rm(BUCKETS.clips, it.key)) footageRemoved++;
-            }
+          if (alive.has(id)) continue; // incident still on file → keep all builds
+          for (const key of items) {
+            if (await rm(BUCKETS.clips, key)) footageRemoved++;
           }
         }
       }
