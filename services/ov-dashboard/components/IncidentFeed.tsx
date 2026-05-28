@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { StatusPill } from "@/components/StatusPill";
 import { ClipModal, type ClipIncident } from "@/components/ClipModal";
-import { formatClock } from "@/lib/format";
+import { dayKey, formatClock, formatDayHeader } from "@/lib/format";
 
 /**
  * Shared, interactive incident list. Identical behaviour everywhere it is
@@ -12,8 +12,10 @@ import { formatClock } from "@/lib/format";
  * watch footage; "Details" → full incident page. One source of truth so
  * every surface is interoperable.
  *
- * `incidents` is rendered in the order given — callers sort as needed
- * (e.g. reverse-chronological feed).
+ * Rows are grouped by local calendar day (viewer's timezone) with a
+ * sticky-ish header between groups ("Today" / "Yesterday" / weekday /
+ * explicit date). Callers still pass a flat reverse-chronological array;
+ * within each day group the existing order is preserved.
  */
 export function IncidentFeed({
   incidents,
@@ -24,6 +26,27 @@ export function IncidentFeed({
 }) {
   const [active, setActive] = useState<ClipIncident | null>(null);
 
+  // Group by local day in the order the caller provided. We re-use the
+  // first opened_at we see for each day as the group key — preserves the
+  // caller's sort (typically reverse-chronological by opened_at).
+  const groups = useMemo(() => {
+    const out: Array<{ key: string; sample: string | Date; items: any[] }> = [];
+    const byKey = new Map<string, { sample: string | Date; items: any[] }>();
+    for (const i of incidents ?? []) {
+      const when: string | Date | undefined = i.opened_at;
+      const k = when ? dayKey(when) : "unknown";
+      const existing = byKey.get(k);
+      if (existing) {
+        existing.items.push(i);
+      } else {
+        const g = { sample: when ?? new Date(0), items: [i] };
+        byKey.set(k, g);
+        out.push({ key: k, sample: g.sample, items: g.items });
+      }
+    }
+    return out;
+  }, [incidents]);
+
   if (!incidents || incidents.length === 0) {
     return (
       <div className="card text-text-muted text-center py-8 text-[13px]">
@@ -32,11 +55,8 @@ export function IncidentFeed({
     );
   }
 
-  return (
-    <>
-      <div className="card p-0 overflow-hidden divide-y divide-border">
-        {incidents.map((i: any) => (
-          <div
+  const renderRow = (i: any) => (
+        <div
             key={i.id}
             role="button"
             tabIndex={0}
@@ -107,6 +127,20 @@ export function IncidentFeed({
               >
                 Details
               </Link>
+            </div>
+          </div>
+  );
+
+  return (
+    <>
+      <div className="space-y-3">
+        {groups.map((g) => (
+          <div key={g.key}>
+            <div className="text-text-muted text-[11px] uppercase tracking-wider font-medium px-1 pb-1.5">
+              {formatDayHeader(g.sample)}
+            </div>
+            <div className="card p-0 overflow-hidden divide-y divide-border">
+              {g.items.map(renderRow)}
             </div>
           </div>
         ))}

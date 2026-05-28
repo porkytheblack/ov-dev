@@ -115,6 +115,9 @@ async function ensureInboxTable(sql: ReturnType<typeof postgres>) {
   // already exists for the primary alert). Lets a reprocessed/reclaimed
   // summary event after a notifier restart be skipped instead of resent.
   await sql`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS summary_notified_at TIMESTAMPTZ`;
+  // Idempotency marker for the late-clip follow-up — set by deliverLateClip
+  // when a clip arrives after the primary text alert has already gone out.
+  await sql`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS clip_notified_at TIMESTAMPTZ`;
 }
 
 /**
@@ -208,6 +211,75 @@ async function dispatch(
   log.info({ incidentId: pending.incidentId, count: subscribers.length }, "dispatched");
 }
 
+/**
+ * Send just the clip (and a "view playback" link) as a *follow-up* message
+ * to every subscriber of an incident that was already alerted text-only.
+ *
+ * Why this exists:
+ *   - The primary `dispatch()` claims `notified_at` so we never send the
+ *     alert TWICE; that's correct for the text alert.
+ *   - But the clip can arrive after the CLIP_WAIT timer fired (auto-
+ *     suppressed incidents skip the engine's incident.closed event entirely
+ *     and only get clipped by the clip-builder backfill loop, often minutes
+ *     later). Before this function existed, that late clip was silently
+ *     dropped — the operator got a text ping and no video.
+ *
+ * Idempotency: uses a `clip_notified_at` column on `incidents` so a
+ * reprocessed clip.ready event after a notifier restart isn't resent.
+ */
+async function deliverLateClip(
+  redis: ReturnType<typeof makeRedis>,
+  sql: ReturnType<typeof postgres>,
+  incidentId: string,
+  urls: { clipUrl: string; posterUrl?: string },
+) {
+  // Only follow up if the incident was actually alerted in the first
+  // place. If `notified_at` is still NULL, the alert is still pending /
+  // suppressed by the engine — no clip-only follow-up makes sense.
+  const claimed = await sql<Array<{ id: string }>>`
+    UPDATE incidents
+       SET clip_notified_at = now()
+     WHERE id = ${incidentId}::uuid
+       AND notified_at IS NOT NULL
+       AND clip_notified_at IS NULL
+    RETURNING id
+  `;
+  if (claimed.length === 0) {
+    log.info({ incidentId }, "late clip — not eligible (not yet alerted, or already followed up)");
+    return;
+  }
+  const rows = await sql<Array<{ cameraId: string; cameraName: string }>>`
+    SELECT camera_id AS "cameraId", c.name AS "cameraName"
+      FROM incidents i JOIN cameras c ON c.id = i.camera_id
+     WHERE i.id = ${incidentId}::uuid
+  `;
+  const m = rows[0];
+  if (!m) return;
+  const secret = process.env.DEEP_LINK_TOKEN_SECRET ?? "change-me";
+  const ttlHours = Number(process.env.DEEP_LINK_TTL_HOURS ?? 24) || 24;
+  const link = signDeepLink({ incidentId, secret, ttlHours });
+  const subscribers = await resolveSubscribers(sql, m.cameraId);
+  for (const sub of subscribers) {
+    await publishEvent(
+      redis,
+      STREAMS.bot_outbox(sub.channel),
+      {
+        type: "bot.outbox",
+        channel: sub.channel,
+        handle: sub.handle,
+        // Short follow-up — the original alert already carries context.
+        text: `🎬 Footage ready for ${m.cameraName}.`,
+        attachments: [
+          { kind: "video", url: urls.clipUrl, caption: m.cameraName },
+          { kind: "link", url: link.url, caption: "View playback" },
+        ],
+        incident_id: incidentId,
+      } as Record<string, unknown>,
+    );
+  }
+  log.info({ incidentId, count: subscribers.length }, "late clip dispatched as follow-up");
+}
+
 async function main() {
   const redis = makeRedis();
   const sql = postgres(
@@ -256,13 +328,25 @@ async function main() {
   });
   void clipConsumer.consume(async (event) => {
     if (event.kind !== "incident" || !event.incident_id) return;
-    const pending = waiting.get(event.incident_id);
-    if (!pending) return;
     const urls = makeAttachmentUrls({ clipKey: event.storage_key, posterKey: event.poster_key });
-    pending.clipUrl = urls.clipUrl;
-    pending.posterUrl = urls.posterUrl;
-    await dispatch(redis, sql, pending);
-    waiting.delete(event.incident_id);
+    const pending = waiting.get(event.incident_id);
+    if (pending) {
+      // Common path: clip arrived before the wait timer fired. Dispatch
+      // the full alert (text + video + link) atomically.
+      pending.clipUrl = urls.clipUrl;
+      pending.posterUrl = urls.posterUrl;
+      await dispatch(redis, sql, pending);
+      waiting.delete(event.incident_id);
+      return;
+    }
+    // Late-arriving clip: the wait timer already fired and the text alert
+    // went out without inline footage. Don't drop the clip — send it as a
+    // standalone follow-up message so the operator gets the video they
+    // were promised. This is the new clip-builder backfill loop's main
+    // delivery path: incidents that the engine auto-suppressed (no
+    // incident.closed event) get their clip built minutes later, and
+    // until now there was no path from that clip back to the chat.
+    await deliverLateClip(redis, sql, event.incident_id, urls);
   });
 
   // Auto-summary delivery: when the vision pipeline finishes summarising a

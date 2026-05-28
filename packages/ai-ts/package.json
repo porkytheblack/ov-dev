@@ -5,7 +5,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./mimo": "./src/mimo.ts"
+    "./mimo": "./src/mimo.ts",
+    "./gemini": "./src/gemini.ts",
+    "./openrouter": "./src/openrouter.ts",
+    "./vision": "./src/vision.ts",
+    "./agent": "./src/agent.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",

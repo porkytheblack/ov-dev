@@ -1,10 +1,11 @@
 /**
- * Sends the public clip (and poster) to the configured Mimo vision model
- * and resolves the natural-language incident summary. Runs asynchronously
- * inside the Station broadcast; retries on transient model errors.
+ * Sends the public clip (and poster) to the configured vision model
+ * (MiMo or Gemini, picked by `VISION_PROVIDER`) and resolves the
+ * natural-language incident summary. Runs asynchronously inside the
+ * Station broadcast; retries on transient model errors.
  */
 import { signal, z } from "station-signal";
-import { analyzeWithMimoVision } from "@overwatch/ai";
+import { analyzeClipVision } from "@overwatch/ai";
 import { log } from "../config.js";
 
 const Input = z.object({
@@ -25,7 +26,7 @@ export const analyzeClip = signal("analyze-clip")
   .timeout(180_000)
   .retries(2)
   .run(async (input) => {
-    const summary = await analyzeWithMimoVision({
+    const summary = await analyzeClipVision({
       prompt: input.prompt,
       images: input.posterUrl ? [{ url: input.posterUrl }] : [],
       videoUrl: input.clipUrl,

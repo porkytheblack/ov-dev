@@ -21,6 +21,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import psycopg
+from psycopg_pool import AsyncConnectionPool
 from fastapi import FastAPI
 from overwatch_shared import (
     BUCKETS,
@@ -37,14 +38,109 @@ app = FastAPI(title="ov-clip-builder")
 
 _stop_event = asyncio.Event()
 _pending_incidents: dict[str, dict] = {}
-PADDING_BEFORE = int(os.environ.get("PADDING_SECONDS_BEFORE", "5"))
-PADDING_AFTER = int(os.environ.get("PADDING_SECONDS_AFTER", "10"))
+# Pre/post-roll around the incident window. MUST equal ov-api's
+# `FOOTAGE_PRE_S` / `FOOTAGE_POST_S` (services/ov-api/src/routes/incidents.ts):
+# the dashboard's /api/incidents/:id/markers route indexes timeline markers from
+# `opened_at - FOOTAGE_PRE_S`, so any drift between the two pre-rolls shifts
+# every marker by that many seconds relative to the actual frames. Keeping these
+# in sync means the same clip works whether it was built here or by ov-api's
+# ondemand fallback.
+PADDING_BEFORE = int(os.environ.get("PADDING_SECONDS_BEFORE", "8"))
+PADDING_AFTER = int(os.environ.get("PADDING_SECONDS_AFTER", "22"))
 
 
 def _db_url() -> str:
     return os.environ.get(
         "DATABASE_URL", "postgres://overwatch:overwatch@postgres:5432/overwatch"
     )
+
+
+# A single shared pool, lazily opened on first use. Bounded by DB_POOL_MAX to
+# avoid the "too many clients already" exhaustion we saw when every query
+# opened a fresh connection — that pattern made each retry storm consume
+# postgres `max_connections` (default 100) across our other services too.
+# A pool also amortises DNS lookups, so a transient "failed to resolve host
+# 'postgres'" doesn't pierce through every call site individually.
+_pool: AsyncConnectionPool | None = None
+_pool_lock: asyncio.Lock | None = None
+DB_POOL_MIN = int(os.environ.get("DB_POOL_MIN", "1"))
+DB_POOL_MAX = int(os.environ.get("DB_POOL_MAX", "4"))
+
+
+def _get_pool_lock() -> asyncio.Lock:
+    global _pool_lock
+    if _pool_lock is None:
+        _pool_lock = asyncio.Lock()
+    return _pool_lock
+
+
+async def _get_pool() -> AsyncConnectionPool:
+    global _pool
+    if _pool is not None:
+        return _pool
+    async with _get_pool_lock():
+        if _pool is None:
+            pool = AsyncConnectionPool(
+                conninfo=_db_url(),
+                min_size=DB_POOL_MIN,
+                max_size=DB_POOL_MAX,
+                # `open=False` + explicit `open()` lets us catch the initial
+                # connect error here (and retry it) instead of at first query.
+                open=False,
+                # Hand out connections only after a quick liveness check —
+                # otherwise a stale connection survives a postgres restart
+                # and the first user gets a confusing IO error.
+                check=AsyncConnectionPool.check_connection,
+                kwargs={"connect_timeout": 10},
+                name="ov-clip-builder",
+            )
+            await pool.open(wait=False)
+            _pool = pool
+    return _pool
+
+
+# Errors worth retrying: DNS resolve failures and connection refusals during
+# brief network/postgres hiccups. psycopg surfaces these as OperationalError
+# (with errno wrapped). We do NOT retry programming/data errors — those are
+# bugs, not transient.
+_RETRY_EXCEPTIONS = (
+    psycopg.OperationalError,
+    OSError,  # covers `gaierror` (DNS) too
+)
+
+
+async def _run_query(
+    fn,
+    *,
+    attempts: int = 3,
+    base_delay: float = 0.5,
+):
+    """Borrow a connection from the pool and run `fn(conn)`. Retries on
+    transient connect failures (DNS, refused, EOF) with exponential backoff.
+
+    `fn` is called with the connection; it owns its own cursor/commit. Calling
+    code doesn't need to know about pooling or retries."""
+    pool = await _get_pool()
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            async with pool.connection() as conn:
+                return await fn(conn)
+        except _RETRY_EXCEPTIONS as e:
+            last_exc = e
+            if attempt == attempts - 1:
+                break
+            delay = base_delay * (2**attempt)
+            log.warning(
+                "db op transient failure, retrying",
+                attempt=attempt + 1,
+                attempts=attempts,
+                delay=delay,
+                error=str(e),
+            )
+            await asyncio.sleep(delay)
+    assert last_exc is not None
+    raise last_exc
 
 
 def _clip_key(camera_id: str, start_ts: datetime, kind: str) -> str:
@@ -56,7 +152,7 @@ def _poster_key(clip_key: str) -> str:
 
 
 async def _fetch_segments(camera_id: str, start_ts: datetime, end_ts: datetime) -> list[dict]:
-    async with await psycopg.AsyncConnection.connect(_db_url()) as conn:
+    async def go(conn: psycopg.AsyncConnection) -> list[dict]:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
@@ -74,10 +170,11 @@ async def _fetch_segments(camera_id: str, start_ts: datetime, end_ts: datetime) 
                 {"id": r[0], "start_ts": r[1], "end_ts": r[2], "storage_key": r[3]}
                 for r in rows
             ]
+    return await _run_query(go)
 
 
 async def _fetch_detections(camera_id: str, start_ts: datetime, end_ts: datetime) -> list[dict]:
-    async with await psycopg.AsyncConnection.connect(_db_url()) as conn:
+    async def go(conn: psycopg.AsyncConnection) -> list[dict]:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
@@ -93,11 +190,12 @@ async def _fetch_detections(camera_id: str, start_ts: datetime, end_ts: datetime
                 {"ts": r[0], "class": r[1], "confidence": r[2], "bbox": r[3], "track_id": r[4]}
                 for r in rows
             ]
+    return await _run_query(go)
 
 
 async def _register_clip(args: dict) -> None:
     retention_days = 90 if args["kind"] == "incident" else 3
-    async with await psycopg.AsyncConnection.connect(_db_url()) as conn:
+    async def go(conn: psycopg.AsyncConnection) -> None:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
@@ -123,18 +221,34 @@ async def _register_clip(args: dict) -> None:
                     (f"s3://{BUCKETS['clips']}/{args['storage_key']}", args["incident_id"]),
                 )
         await conn.commit()
+    await _run_query(go)
 
 
 def _concat_segments(local_paths: list[Path], out_path: Path) -> None:
-    """ffmpeg concat without re-encoding for speed."""
+    """Concat segments and transcode to H.264 so the result plays in every
+    browser. Source segments are HEVC (Hikvision RTSP stream-copied by the
+    ingestor); H.264 + yuv420p + faststart is universally decodable. Recipe
+    mirrors ov-api's ondemand build so both pipelines produce identical output.
+    Even-dimension scale guards libx264's 4:2:0 requirement (some cameras
+    deliver odd heights)."""
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
         for p in local_paths:
             f.write(f"file '{p}'\n")
         list_file = f.name
     cmd = [
         "ffmpeg", "-y",
+        "-loglevel", "error",
         "-f", "concat", "-safe", "0", "-i", list_file,
-        "-c", "copy", "-movflags", "+faststart",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-profile:v", "main",
+        "-pix_fmt", "yuv420p",
+        "-crf", "23",
+        "-an",
+        "-fflags", "+genpts",
+        "-avoid_negative_ts", "make_zero",
+        "-movflags", "+faststart",
         str(out_path),
     ]
     subprocess.run(cmd, check=True, capture_output=True)
@@ -148,24 +262,58 @@ def _overlay_detections(in_path: Path, out_path: Path, detections: list[dict], v
 
     `video_start` MUST be the wall-clock time of the FIRST frame of `in_path`
     — i.e. the start_ts of the earliest concatenated segment — NOT the padded
-    incident window start. The concat is `-c copy` (untrimmed), so frame 0 is
-    a segment boundary that can sit many seconds before window_start; indexing
-    detections from anything but the true video start draws every box that
-    many seconds off (boxes float over empty space)."""
+    incident window start. The concat is untrimmed, so frame 0 is a segment
+    boundary that can sit many seconds before window_start; indexing detections
+    from anything but the true video start draws every box that many seconds
+    off (boxes float over empty space).
+
+    Encoding: OpenCV's mp4v fourcc writes MPEG-4 Part 2, which the dashboard's
+    direct by-key playback can't decode (black box). Instead we pipe BGR frames
+    into an ffmpeg child running libx264, producing the same H.264/yuv420p/
+    +faststart container as _concat_segments."""
     if video_start.tzinfo is None:
         video_start = video_start.replace(tzinfo=timezone.utc)
     cap = cv2.VideoCapture(str(in_path))
     if not cap.isOpened():
-        # Couldn't decode — fall back to the raw concat.
+        # Couldn't decode — fall back to the raw concat (already H.264).
         in_path.rename(out_path)
         return
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(out_path), fourcc, fps, (w, h))
-    # Index detections by ms-from-window-start.
-    indexed: list[tuple[int, list[dict]]] = []
+    if w <= 0 or h <= 0:
+        cap.release()
+        in_path.rename(out_path)
+        return
+    # libx264/yuv420p needs even dimensions; the concat already forces this,
+    # but be defensive — if width/height are odd we'd crash ffmpeg below.
+    even_w = w - (w % 2)
+    even_h = h - (h % 2)
+    ffmpeg_proc = subprocess.Popen(
+        [
+            "ffmpeg", "-y",
+            "-loglevel", "error",
+            "-f", "rawvideo",
+            "-pixel_format", "bgr24",
+            "-video_size", f"{w}x{h}",
+            "-framerate", f"{fps:.6f}",
+            "-i", "-",
+            *(["-vf", f"crop={even_w}:{even_h}:0:0"] if (even_w != w or even_h != h) else []),
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-profile:v", "main",
+            "-pix_fmt", "yuv420p",
+            "-crf", "23",
+            "-an",
+            "-movflags", "+faststart",
+            str(out_path),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    assert ffmpeg_proc.stdin is not None
+    # Index detections by ms-from-window-start (100ms buckets).
     grouped: dict[int, list[dict]] = {}
     for d in detections:
         ts = d["ts"]
@@ -177,9 +325,8 @@ def _overlay_detections(in_path: Path, out_path: Path, detections: list[dict], v
         if ms < 0:
             continue  # detection precedes the footage we have — can't place it
         grouped.setdefault(ms // 100, []).append(d)
-    for k in sorted(grouped.keys()):
-        indexed.append((k, grouped[k]))
     frame_idx = 0
+    stderr_data = b""
     try:
         while True:
             ok, frame = cap.read()
@@ -187,7 +334,6 @@ def _overlay_detections(in_path: Path, out_path: Path, detections: list[dict], v
                 break
             ms = int(frame_idx * 1000.0 / fps)
             bucket = ms // 100
-            # Find the closest detection bucket within ±200ms.
             for delta in (0, -1, 1, -2, 2):
                 cand = grouped.get(bucket + delta)
                 if cand:
@@ -200,11 +346,32 @@ def _overlay_detections(in_path: Path, out_path: Path, detections: list[dict], v
                         cv2.rectangle(frame, (x1, y1 - 18), (x1 + 7 * len(label), y1), (0, 0xA8, 0xF5), -1)
                         cv2.putText(frame, label, (x1 + 2, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1)
                     break
-            writer.write(frame)
+            try:
+                ffmpeg_proc.stdin.write(frame.tobytes())
+            except BrokenPipeError:
+                # ffmpeg died — drain stderr below for the actual reason.
+                break
             frame_idx += 1
     finally:
         cap.release()
-        writer.release()
+        try:
+            ffmpeg_proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            stderr_data = ffmpeg_proc.stderr.read() if ffmpeg_proc.stderr else b""
+        except Exception:
+            stderr_data = b""
+        rc = ffmpeg_proc.wait(timeout=60)
+    if rc != 0 or not out_path.exists() or out_path.stat().st_size == 0:
+        log.warning(
+            "overlay ffmpeg encode failed",
+            rc=rc,
+            stderr=stderr_data.decode("utf-8", errors="ignore")[-400:],
+        )
+        # Surface failure so the caller's `except Exception` falls back to the
+        # raw H.264 concat (which is universally playable already).
+        raise RuntimeError(f"overlay ffmpeg exited {rc}")
 
 
 def _extract_poster(clip_path: Path, poster_path: Path) -> None:
@@ -318,16 +485,17 @@ async def on_incident_closed(event: dict, _msg_id: str, redis, minio) -> None:
     pend = _pending_incidents.pop(iid, None)
     closed_at = datetime.fromisoformat(event["closed_at"].replace("Z", "+00:00"))
     if pend is None:
-        async with await psycopg.AsyncConnection.connect(_db_url()) as conn:
+        async def lookup(conn: psycopg.AsyncConnection):
             async with conn.cursor() as cur:
                 await cur.execute(
                     "SELECT camera_id, opened_at FROM incidents WHERE id = %s",
                     (iid,),
                 )
-                row = await cur.fetchone()
-                if not row:
-                    return
-                pend = {"camera_id": str(row[0]), "opened_at": row[1]}
+                return await cur.fetchone()
+        row = await _run_query(lookup)
+        if not row:
+            return
+        pend = {"camera_id": str(row[0]), "opened_at": row[1]}
     try:
         await build_incident_clip(iid, pend["camera_id"], pend["opened_at"], closed_at, redis, minio)
     except Exception as e:
@@ -335,6 +503,7 @@ async def on_incident_closed(event: dict, _msg_id: str, redis, minio) -> None:
 
 
 async def incident_loop() -> None:
+    log.info("incident_loop: starting")
     redis = make_redis()
     minio = make_minio()
     with contextlib.suppress(Exception):
@@ -355,6 +524,7 @@ async def incident_loop() -> None:
 
 
 async def regular_clip_loop() -> None:
+    log.info("regular_clip_loop: starting")
     """Every 5 minutes: scan detections in the prior 5 min, build short clips
     for each camera that had ≥1 class-of-interest detection. These are visible
     in the calendar but not notification-worthy."""
@@ -364,7 +534,7 @@ async def regular_clip_loop() -> None:
         try:
             now = datetime.now(timezone.utc)
             window_start = now - timedelta(minutes=5)
-            async with await psycopg.AsyncConnection.connect(_db_url()) as conn:
+            async def list_cameras(conn: psycopg.AsyncConnection):
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
@@ -373,7 +543,8 @@ async def regular_clip_loop() -> None:
                         """,
                         (window_start, now),
                     )
-                    cameras = [str(r[0]) for r in await cur.fetchall()]
+                    return [str(r[0]) for r in await cur.fetchall()]
+            cameras = await _run_query(list_cameras)
             for camera_id in cameras:
                 try:
                     segs = await _fetch_segments(camera_id, window_start, now)
@@ -442,17 +613,204 @@ async def regular_clip_loop() -> None:
             pass
 
 
+async def incident_backfill_loop() -> None:
+    log.info("incident_backfill_loop: starting")
+    """Periodic backfill: build clips for any incident with
+    `clip_status='pending'` regardless of how it ended (closed, suppressed,
+    or still open past a grace window).
+
+    Why: the event-driven path only fires on `incident.closed`. The engine
+    can auto-suppress an incident (linger threshold not met) and the API
+    `/status` endpoint can suppress/close without publishing an event, so
+    those incidents would never get a clip. The operator wants a clip for
+    *every* opened incident — review value doesn't depend on whether the
+    engine ultimately decided the detections were spammy. This loop closes
+    that gap (and also survives missed/dropped Redis events).
+    """
+    redis = make_redis()
+    minio = make_minio()
+    with contextlib.suppress(Exception):
+        ensure_buckets(minio)
+    # Wait this long after `opened_at` before considering an open incident
+    # ready to clip — gives the recording enough footage to be useful.
+    min_age_s = int(os.environ.get("BACKFILL_MIN_AGE_SEC", "30"))
+    # How often to scan. ~60s is enough — clip-builder doesn't need to be
+    # millisecond-fresh, and the event path still catches the common case.
+    interval_s = int(os.environ.get("BACKFILL_INTERVAL_SEC", "60"))
+    # How far back to look. Older pending incidents are usually broken
+    # (segments long gone) — surface as warnings but don't churn forever.
+    lookback_h = int(os.environ.get("BACKFILL_LOOKBACK_HOURS", "24"))
+    max_per_run = int(os.environ.get("BACKFILL_MAX_PER_RUN", "10"))
+
+    async def fetch_pending(conn):
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id::text, camera_id::text, status, opened_at, closed_at
+                  FROM incidents
+                 WHERE COALESCE(clip_status, 'pending') = 'pending'
+                   AND opened_at > now() - (%s || ' hours')::interval
+                   AND opened_at < now() - (%s || ' seconds')::interval
+                 ORDER BY opened_at DESC
+                 LIMIT %s
+                """,
+                (str(lookback_h), str(min_age_s), max_per_run),
+            )
+            rows = await cur.fetchall()
+            return [
+                {
+                    "id": r[0],
+                    "camera_id": r[1],
+                    "status": r[2],
+                    "opened_at": r[3],
+                    "closed_at": r[4],
+                }
+                for r in rows
+            ]
+
+    while not _stop_event.is_set():
+        try:
+            pending = await _run_query(fetch_pending)
+            for inc in pending:
+                # Don't race with the event-driven path — if we have an
+                # in-memory pending placeholder, that handler will build it.
+                if inc["id"] in _pending_incidents:
+                    continue
+                # End of the build window: closed_at if we have it, else
+                # bounded fall-back. An incident with no `closed_at` is
+                # either (a) auto-suppressed by the engine (linger threshold
+                # not met) or (b) still open. For (a) the suppression
+                # happened seconds after opening — never want to capture an
+                # hour of unrelated footage just because the row's never
+                # been closed. For (b) we want a representative slice, not
+                # the whole live tail. Cap to opened_at + max-window so the
+                # resulting clip is something the vision provider can
+                # actually process (OpenRouter timed out on a multi-hour
+                # backfilled clip).
+                # 25s + 8s pre + 22s post ≈ 55s of footage. At our cameras'
+                # 1080p H.264 CRF 23 that's ~15–25MB, well under OpenRouter's
+                # video upload ceiling. A previous 60s cap produced a 66MB
+                # clip on East compound and Gemini timed out base64-decoding
+                # it — adjusting smaller is the simplest robust fix.
+                max_window_s = int(os.environ.get("BACKFILL_MAX_WINDOW_SEC", "25"))
+                end_ts = inc["closed_at"] or min(
+                    datetime.now(timezone.utc),
+                    inc["opened_at"] + timedelta(seconds=max_window_s),
+                )
+                try:
+                    await build_incident_clip(
+                        inc["id"],
+                        inc["camera_id"],
+                        inc["opened_at"],
+                        end_ts,
+                        redis,
+                        minio,
+                    )
+                except Exception as e:
+                    log.error(
+                        "backfill build failed",
+                        error=str(e),
+                        incident_id=inc["id"],
+                        status=inc["status"],
+                    )
+                # build_incident_clip flips clip_status to 'ready' only on
+                # success. If it's still 'pending' after we ran, the
+                # underlying segments are gone (or some other unrecoverable
+                # condition) — mark 'failed' so the backfill stops churning
+                # on this row. The incident itself is preserved; just no
+                # footage will materialise for it.
+                async def mark_failed_if_pending(conn, iid=inc["id"]):
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            """
+                            UPDATE incidents
+                               SET clip_status = 'failed'
+                             WHERE id = %s::uuid
+                               AND COALESCE(clip_status, 'pending') = 'pending'
+                            """,
+                            (iid,),
+                        )
+                    await conn.commit()
+                with contextlib.suppress(Exception):
+                    await _run_query(mark_failed_if_pending)
+        except Exception as e:
+            log.error("incident_backfill_loop iteration failed", error=str(e))
+        try:
+            await asyncio.wait_for(_stop_event.wait(), timeout=interval_s)
+        except asyncio.TimeoutError:
+            pass
+
+
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _on_task_done(task: asyncio.Task) -> None:
+    _background_tasks.discard(task)
+    if task.cancelled():
+        log.warning("background task cancelled", name=task.get_name())
+        return
+    exc = task.exception()
+    if exc is not None:
+        log.error(
+            "background task died",
+            name=task.get_name(),
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+
+def _spawn(coro, name: str | None = None) -> asyncio.Task:
+    """Schedule a long-lived background coroutine and pin a strong reference.
+
+    `asyncio.create_task` returns a Task that the event loop only WEAKLY
+    references. If nothing in user code holds a strong ref, the task is
+    eligible for GC the moment the scheduling function returns. We
+    previously saw "Task was destroyed but it is pending!" warnings
+    immediately after startup with the consumer task silently dying
+    before processing a single event — same root cause. Storing the task
+    in a module-level set keeps it alive for the lifetime of the process.
+
+    The done callback also surfaces silent task deaths (uncaught
+    exceptions / cancellations) into our structured log so a regression
+    doesn't go unnoticed for hours."""
+    t = asyncio.create_task(coro, name=name)
+    _background_tasks.add(t)
+    t.add_done_callback(_on_task_done)
+    return t
+
+
 @app.on_event("startup")
 async def _startup() -> None:
-    asyncio.create_task(incident_loop())
-    asyncio.create_task(regular_clip_loop())
+    log.info("startup: opening pool")
+    with contextlib.suppress(Exception):
+        await _get_pool()
+    log.info("startup: spawning background tasks")
+    _spawn(incident_loop(), name="incident_loop")
+    _spawn(regular_clip_loop(), name="regular_clip_loop")
+    _spawn(incident_backfill_loop(), name="incident_backfill_loop")
+    log.info("startup: complete", n_tasks=len(_background_tasks))
 
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     _stop_event.set()
+    global _pool
+    if _pool is not None:
+        with contextlib.suppress(Exception):
+            await _pool.close()
+        _pool = None
 
 
 @app.get("/health")
 async def health() -> dict:
-    return {"ok": True, "service": "ov-clip-builder", "pending": len(_pending_incidents)}
+    pool_info: dict[str, int | bool] = {"open": _pool is not None}
+    if _pool is not None:
+        with contextlib.suppress(Exception):
+            st = _pool.get_stats()
+            pool_info["pool_size"] = st.get("pool_size", 0)
+            pool_info["requests_waiting"] = st.get("requests_waiting", 0)
+    return {
+        "ok": True,
+        "service": "ov-clip-builder",
+        "pending": len(_pending_incidents),
+        "db": pool_info,
+    }

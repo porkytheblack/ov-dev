@@ -17,7 +17,7 @@ import {
   r2Configured,
   type Logger,
 } from "@overwatch/shared-ts";
-import { mimoConfigured } from "@overwatch/ai";
+import { visionConfigured, visionProvider } from "@overwatch/ai";
 import { ClipReady, CONSUMER_GROUP, FireReview, STREAMS } from "@overwatch/schemas/events";
 
 const log: Logger = makeLogger("ov-station");
@@ -111,7 +111,8 @@ async function main() {
       service: "ov-station",
       role: "redis-bridge",
       station_key_configured: STATION_API_KEY !== "",
-      mimo_vision_configured: mimoConfigured("vision"),
+      vision_provider: visionProvider(),
+      vision_configured: visionConfigured(),
       r2_configured: r2Configured(),
     }),
   );

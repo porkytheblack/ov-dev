@@ -1,6 +1,15 @@
-export function StatusPill({ status }: { status: string }) {
+// Accepts `undefined`/`null` so a partially-loaded camera or incident
+// row doesn't crash the page with `t.toUpperCase()` — which is what hit
+// the operator's Telegram in-app browser when the API returned a non-
+// session response and `camera.status` came back undefined.
+export function StatusPill({
+  status,
+}: {
+  status?: string | null | undefined;
+}) {
+  const normalized = typeof status === "string" && status.length > 0 ? status : "unknown";
   const { cls, dot } = (() => {
-    switch (status) {
+    switch (normalized) {
       case "open":
         return { cls: "pill pill-open", dot: false };
       case "closed":
@@ -28,7 +37,7 @@ export function StatusPill({ status }: { status: string }) {
           className="inline-block w-1.5 h-1.5 rounded-full bg-current"
         />
       )}
-      {status.toUpperCase()}
+      {normalized.toUpperCase()}
     </span>
   );
 }

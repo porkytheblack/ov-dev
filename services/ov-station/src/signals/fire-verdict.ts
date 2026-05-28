@@ -1,18 +1,20 @@
 /**
  * Root of the fire-adjudication broadcast. Pulls the retained suspect frame
- * out of MinIO, hands it to the Mimo vision model as a base64 data URI, and
- * resolves a strict fire / false-alarm / undetermined verdict.
+ * out of MinIO, hands it to the configured vision model (MiMo or Gemini,
+ * picked by `VISION_PROVIDER`) as a base64 data URI, and resolves a strict
+ * fire / false-alarm / unavailable verdict.
  *
- * FAIL-OPEN by construction: this signal must never throw and never leave
- * the decision blank. Anything that prevents a real verdict (no retained
- * frame, MinIO miss, model down/timeout, refusal) resolves to
- * `"undetermined"`, which the broadcast treats as "alert anyway" — a real
- * fire is never dropped because the second opinion was unavailable. Only an
- * explicit model `false_alarm` suppresses the alert.
+ * FAIL-CLOSED for the uncertain band by operator policy: anything that
+ * prevents a real verdict (no retained frame, MinIO miss, model down /
+ * timeout / refusal / not configured) resolves to `"unavailable"`, which
+ * the broadcast treats as "suppress" — no spam while the adjudicator is
+ * unreachable. High-confidence fire still alerts engine-direct,
+ * independent of the adjudicator. Only an explicit model `false_alarm`
+ * suppresses a high-confidence detection.
  */
 import { signal, z } from "station-signal";
 import { BUCKETS, makeMinio } from "@overwatch/shared-ts";
-import { classifyFireWithMimo, mimoConfigured } from "@overwatch/ai";
+import { classifyFireVision, visionConfigured } from "@overwatch/ai";
 import { sql, log } from "../config.js";
 
 const Input = z.object({
@@ -67,11 +69,11 @@ export const fireVerdict = signal("fire-verdict")
           reason: "no frame retained",
         };
       }
-      if (!mimoConfigured("vision")) {
+      if (!visionConfigured()) {
         return {
           ...base,
           decision: "unavailable" as const,
-          reason: "mimo vision not configured",
+          reason: "vision adjudicator not configured",
         };
       }
 
@@ -99,7 +101,7 @@ export const fireVerdict = signal("fire-verdict")
       `;
       const cameraName = cam[0]?.name ?? "the camera";
 
-      const res = await classifyFireWithMimo({
+      const res = await classifyFireVision({
         imageUrl: dataUri,
         cameraName,
         classes: input.classes,

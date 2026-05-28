@@ -2,7 +2,7 @@ import { z } from "zod";
 import postgres from "postgres";
 import { humanWhen, publishEvent, type makeRedis } from "@overwatch/shared-ts";
 import { STREAMS } from "@overwatch/schemas/events";
-import { signDeepLink } from "./deep-link.js";
+import { signDeepLink, signLiveLink } from "./deep-link.js";
 
 export type ToolDeps = {
   sql: ReturnType<typeof postgres>;
@@ -517,9 +517,12 @@ export const show_live_view = (deps: ToolDeps) => ({
       };
     }
     const apiBase = (deps.internalApiUrl ?? "http://ov-api:3001").replace(/\/+$/, "");
-    const dashBase = (deps.dashboardBaseUrl ?? "http://localhost:9090").replace(/\/+$/, "");
     const snapshotUrl = `${apiBase}/api/cameras/${cam.id}/snapshot`;
-    const liveUrl = `${dashBase}/cameras/${cam.id}`;
+    // Signed-token live URL — same scheme as the incident playback deep
+    // link, so the messenger recipient can open it without a dashboard
+    // session (Telegram in-app webview has none, which is why the raw
+    // /cameras/:id URL used to crash on missing camera-API responses).
+    const liveUrl = signLiveLink(cam.id);
     const lastSeen = cam.last_frame_at
       ? `last frame ${humanWhen(cam.last_frame_at, OV_TIMEZONE)}`
       : "no recent frames";

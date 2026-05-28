@@ -29,7 +29,13 @@ const BUFFER_MS = 30000;
 const WHEP_CONNECT_TIMEOUT_MS = 9000;
 
 type Sample = { t: number; dets: any[] };
-type Mode = "connecting" | "webrtc" | "hls";
+// `snapshot` is the last-resort polling fallback used when neither WebRTC
+// nor HLS can start (Telegram in-app webview gates both on iOS, and
+// random constructor throws used to bubble up as a Next.js crash overlay).
+// `error` is a terminal state for unexpected throws inside the setup path.
+type Mode = "connecting" | "webrtc" | "hls" | "snapshot" | "error";
+
+const SNAPSHOT_POLL_MS = 2500;
 
 export function LiveViewer({ cameraId }: { cameraId: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -190,21 +196,45 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
       if (!cancelled) setMode("hls");
     };
 
+    // Wraps the whole live-init pipeline. Any uncaught throw in here used
+    // to crash React (Next.js error overlay was what the Telegram in-app
+    // webview was hitting because RTCPeerConnection/MSE are gated there).
+    // Falls through to snapshot polling so the operator at least sees a
+    // recent frame in restricted webviews.
     (async () => {
+      const hasWebRTC =
+        typeof window !== "undefined" && typeof RTCPeerConnection !== "undefined";
       let ok = false;
-      try {
-        ok = await connectWhep();
-      } catch {
-        ok = false;
+      if (hasWebRTC) {
+        try {
+          ok = await connectWhep();
+        } catch {
+          ok = false;
+        }
       }
       if (cancelled) return;
       if (ok) {
         setMode("webrtc");
-      } else {
-        teardownPc();
-        startHls();
+        return;
       }
-    })();
+      teardownPc();
+      try {
+        startHls();
+        return;
+      } catch (e) {
+        // hls.js / native HLS init can throw in restricted webviews. Fall
+        // through to snapshot mode rather than crashing the page.
+        setError(`hls init: ${(e as Error).message ?? "failed"}`);
+      }
+      if (!cancelled) setMode("snapshot");
+    })().catch((e) => {
+      // Defence in depth — the IIFE shouldn't throw past its own catches,
+      // but a thrown synchronous error inside an awaited promise chain
+      // would surface here. Always degrade to snapshot rather than crash.
+      if (cancelled) return;
+      setError(`live init: ${(e as Error)?.message ?? "failed"}`);
+      setMode("snapshot");
+    });
 
     return () => {
       cancelled = true;
@@ -270,6 +300,10 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
 
   useEffect(() => {
     let raf = 0;
+    // The overlay tick reads from the video element + canvas. In snapshot
+    // mode neither exists, so don't bother starting the loop — also
+    // protects against canvas-getContext throwing in restricted webviews.
+    if (mode === "snapshot" || mode === "error") return;
 
     const hlsWallMs = (video: HTMLVideoElement): { ms: number; src: string } => {
       const fr = fragRef.current;
@@ -360,33 +394,67 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [cameraId]);
+  }, [cameraId, mode]);
+
+  // Snapshot-polling fallback used by restricted webviews (e.g. Telegram's
+  // in-app browser on iOS, which blocks WebRTC + MSE). Bumps a cache-buster
+  // every SNAPSHOT_POLL_MS so the <img> re-fetches the latest frame.
+  const [snapshotTick, setSnapshotTick] = useState(0);
+  useEffect(() => {
+    if (mode !== "snapshot") return;
+    const t = setInterval(() => setSnapshotTick((n) => n + 1), SNAPSHOT_POLL_MS);
+    return () => clearInterval(t);
+  }, [mode]);
+  const snapshotSrc = `/api/cameras/${cameraId}/snapshot?t=${snapshotTick}`;
 
   return (
     <div
       ref={wrapRef}
       className={`relative bg-black w-full ${isFs ? "h-screen" : "aspect-video"}`}
     >
-      <video
-        ref={videoRef}
-        muted
-        autoPlay
-        playsInline
-        className="absolute inset-0 w-full h-full object-cover"
-      />
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-      />
+      {mode === "snapshot" ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={snapshotTick}
+          src={snapshotSrc}
+          alt="camera snapshot"
+          className="absolute inset-0 w-full h-full object-cover"
+          onError={() => {
+            /* keep showing the previous frame; next poll will retry */
+          }}
+        />
+      ) : (
+        <>
+          <video
+            ref={videoRef}
+            muted
+            autoPlay
+            playsInline
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+          />
+        </>
+      )}
 
       <div className="absolute top-2 left-3 flex items-center gap-2 bg-black/65 px-2 py-1 rounded">
         <span className="mono uppercase tracking-[0.08em] text-[11px] text-white flex items-center gap-1.5">
           <span
             className={`inline-block w-1.5 h-1.5 rounded-full ${
-              mode === "connecting" ? "bg-text-dim" : "bg-accent"
+              mode === "connecting"
+                ? "bg-text-dim"
+                : mode === "snapshot"
+                  ? "bg-warning"
+                  : "bg-accent"
             }`}
           />
-          {mode === "connecting" ? "CONNECTING" : "LIVE"}
+          {mode === "connecting"
+            ? "CONNECTING"
+            : mode === "snapshot"
+              ? "SNAPSHOT"
+              : "LIVE"}
         </span>
         {stat && (
           <span className="mono text-[11px] text-white/80 border-l border-white/25 pl-2">
@@ -395,15 +463,23 @@ export function LiveViewer({ cameraId }: { cameraId: string }) {
         )}
       </div>
       <div className="absolute top-2 right-2 flex gap-2">
-        <button onClick={() => setBoxes((b) => !b)} className="btn">
-          BOXES {boxes ? "ON" : "OFF"}
-        </button>
+        {mode !== "snapshot" && (
+          <button onClick={() => setBoxes((b) => !b)} className="btn">
+            BOXES {boxes ? "ON" : "OFF"}
+          </button>
+        )}
         <button onClick={toggleFullscreen} className="btn" title="Toggle fullscreen">
           {isFs ? "EXIT FULLSCREEN" : "FULLSCREEN"}
         </button>
       </div>
 
-      {error && (
+      {mode === "snapshot" && (
+        <div className="absolute inset-x-0 bottom-0 px-3 py-2 mono text-[11px] bg-black/70 text-text-dim">
+          Live stream unsupported in this browser — showing periodic
+          snapshots. Open in your main browser for the full live view.
+        </div>
+      )}
+      {mode !== "snapshot" && error && (
         <div className="absolute inset-x-0 bottom-0 px-3 py-2 mono text-[11px] bg-black/70 text-danger">
           stream error: {error}
         </div>
