@@ -4,6 +4,7 @@ import { zValidator } from "@hono/zod-validator";
 import { v4 as uuid } from "uuid";
 import postgres from "postgres";
 import { BUCKETS, makeMinio, makeRedis } from "@overwatch/shared-ts";
+import { verifySubjectDeepLink } from "../deep-link.js";
 
 export function makeCameraRoutes(sql: ReturnType<typeof postgres>) {
   const app = new Hono();
@@ -281,6 +282,24 @@ export function makeCameraRoutes(sql: ReturnType<typeof postgres>) {
     } catch (e) {
       return c.json({ ok: false, error: (e as Error).message }, 500);
     }
+  });
+
+  // Token-gated live-view info for messenger deep links. The signed
+  // token IS the credential; the page that calls this is public so a
+  // Telegram/WhatsApp recipient can open it with no dashboard session.
+  // Mirrors /incidents/:id/playback?token=…
+  app.get("/:id/live", async (c) => {
+    const id = c.req.param("id");
+    const token = c.req.query("token") ?? "";
+    if (!token) return c.json({ error: "token required" }, 401);
+    const secret = process.env.DEEP_LINK_TOKEN_SECRET ?? "change-me";
+    const v = verifySubjectDeepLink({ subjectId: id, token, secret });
+    if (!v.ok) return c.json({ error: v.reason ?? "invalid token" }, 401);
+    const rows = await sql<Array<{ id: string; name: string; status: string }>>`
+      SELECT id::text, name, status FROM cameras WHERE id = ${id}::uuid LIMIT 1
+    `;
+    if (!rows[0]) return c.json({ error: "camera not found" }, 404);
+    return c.json({ camera: rows[0] });
   });
 
   app.get("/:id/snapshot", async (c) => {

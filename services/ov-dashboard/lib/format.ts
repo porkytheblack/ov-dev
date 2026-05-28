@@ -47,6 +47,42 @@ export function formatRelative(value: string | Date): string {
   return `${Math.round(s / 86400)}d ago`;
 }
 
+/** Local Y-M-D key for grouping rows by day in the viewer's timezone. */
+export function dayKey(value: string | Date): string {
+  const d = value instanceof Date ? value : new Date(value);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * Header label for a date group in an incident feed:
+ *   - same calendar day as `now` → "Today"
+ *   - day before                  → "Yesterday"
+ *   - within 6 days of now        → "Thursday" (weekday name)
+ *   - older                       → "May 18, 2026"
+ * Both `value` and the reference clock are interpreted in the viewer's
+ * local timezone so groups line up with what the operator sees on their
+ * wall clock, not UTC.
+ */
+export function formatDayHeader(
+  value: string | Date,
+  now: Date = new Date(),
+): string {
+  const d = value instanceof Date ? value : new Date(value);
+  const a = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const b = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const days = Math.round((b - a) / 86_400_000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days > 1 && days < 7) {
+    return d.toLocaleDateString(undefined, { weekday: "long" });
+  }
+  return d.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const s = Math.round(ms / 1000);

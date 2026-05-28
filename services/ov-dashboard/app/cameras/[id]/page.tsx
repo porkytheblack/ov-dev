@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Nav } from "@/components/Nav";
 import { StatusPill } from "@/components/StatusPill";
 import { LiveViewer } from "@/components/LiveViewer";
 import { IncidentFeed } from "@/components/IncidentFeed";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { formatRelative } from "@/lib/format";
 
 export default function CameraPage() {
@@ -16,10 +17,17 @@ export default function CameraPage() {
   const [incidents, setIncidents] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch(`/api/cameras/${id}`).then((r) => r.json()).then(setCamera).catch(() => {});
-    fetch(`/api/incidents?camera_id=${id}&limit=20`)
-      .then((r) => r.json())
-      .then((j) => setIncidents(j.incidents ?? []))
+    // Treat any non-2xx (e.g. 401 from in-app browsers with no session
+    // cookie) as "no data" instead of spreading an error body into camera
+    // state, where consumers like StatusPill would then read undefined
+    // fields and crash.
+    fetch(`/api/cameras/${id}`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c) => setCamera(c && typeof c.id === "string" ? c : null))
+      .catch(() => {});
+    fetch(`/api/incidents?camera_id=${id}&limit=20`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => setIncidents(Array.isArray(j?.incidents) ? j.incidents : []))
       .catch(() => {});
   }, [id]);
 
@@ -49,7 +57,26 @@ export default function CameraPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">
           {/* Live stream */}
           <div className="lg:col-span-2 card p-0 overflow-hidden">
-            <LiveViewer cameraId={id} />
+            <ErrorBoundary
+              fallback={(err, reset) => (
+                <div className="aspect-video bg-black grid place-items-center text-center px-4">
+                  <div>
+                    <div className="mono text-[11px] uppercase tracking-wider text-text-dim mb-2">
+                      Live view unavailable
+                    </div>
+                    <div className="text-text-muted text-[13px] mb-3 max-w-sm">
+                      {err.message ||
+                        "Couldn't start the live stream in this browser. Try opening the dashboard in your main browser."}
+                    </div>
+                    <button onClick={reset} className="btn">
+                      Retry
+                    </button>
+                  </div>
+                </div>
+              )}
+            >
+              <LiveViewer cameraId={id} />
+            </ErrorBoundary>
           </div>
 
           {/* Camera details */}

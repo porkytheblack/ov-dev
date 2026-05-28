@@ -16,7 +16,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { Glove, type Message, type ModelPromptResult } from "glove-core";
 import { Displaymanager } from "glove-core/display-manager";
-import { makeMimoChatModel, mimoConfigured } from "@overwatch/ai";
+import { agentChatConfigured, agentProvider, makeAgentChatModel } from "@overwatch/ai";
 import { makeLogger, makeRedis } from "@overwatch/shared-ts";
 import postgres from "postgres";
 import { PgConversationStore } from "./glove-store.js";
@@ -75,7 +75,7 @@ async function chat(channel: string, handle: string, message: string): Promise<s
   });
   const glove = new Glove({
     store,
-    model: makeMimoChatModel(),
+    model: makeAgentChatModel(),
     displayManager: new Displaymanager(),
     systemPrompt: systemPrompt(channel),
     serverMode: true,
@@ -108,7 +108,12 @@ async function chat(channel: string, handle: string, message: string): Promise<s
 const app = new Hono();
 
 app.get("/health", (c) =>
-  c.json({ ok: true, service: "ov-agent", model_configured: mimoConfigured("chat") }),
+  c.json({
+    ok: true,
+    service: "ov-agent",
+    agent_provider: agentProvider(),
+    model_configured: agentChatConfigured(),
+  }),
 );
 
 app.post("/chat", async (c) => {
@@ -120,9 +125,23 @@ app.post("/chat", async (c) => {
   if (!body.channel || !body.handle || !body.message) {
     return c.json({ error: "channel, handle, message required" }, 400);
   }
-  if (!mimoConfigured("chat")) {
+  if (!agentChatConfigured()) {
+    const p = agentProvider();
+    const keyName =
+      p === "mimo"
+        ? "MIMO_API_KEY"
+        : p === "kimi"
+          ? "MOONSHOT_API_KEY"
+          : p === "minimax"
+            ? "MINIMAX_API_KEY"
+            : p === "openrouter"
+              ? "OPENROUTER_API_KEY"
+              : "GEMINI_API_KEY";
     return c.json(
-      { error: "mimo not configured", response: "The agent isn't configured yet (missing MIMO_API_KEY)." },
+      {
+        error: `${p} not configured`,
+        response: `The agent isn't configured yet (AGENT_PROVIDER=${p} but ${keyName} is unset).`,
+      },
       503,
     );
   }
@@ -204,7 +223,10 @@ const port = Number(process.env.AGENT_PORT ?? 3000);
 ensureSchema()
   .then(() =>
     serve({ fetch: app.fetch, port }, () =>
-      log.info({ port }, "ov-agent ready (Glove + Mimo)"),
+      log.info(
+        { port, provider: agentProvider(), configured: agentChatConfigured() },
+        "ov-agent ready",
+      ),
     ),
   )
   .catch((e) => {
