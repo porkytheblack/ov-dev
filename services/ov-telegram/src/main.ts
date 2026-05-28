@@ -341,6 +341,119 @@ async function sendVideos(
   return ids;
 }
 
+const MAX_TG_PHOTO_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Fetch a snapshot/image from the internal API (host rewritten, same as
+ * clips) and upload it to Telegram as a photo. Mirrors sendClipFile but
+ * without transcoding. Returns the message_id.
+ */
+async function sendPhotoFile(
+  handle: string,
+  srcUrl: string,
+  caption: string,
+  replyMarkup?: unknown,
+): Promise<number | null> {
+  if (!API) return null;
+  let path: string;
+  try {
+    const u = new URL(srcUrl);
+    path = `${u.pathname}${u.search}`;
+  } catch {
+    return null;
+  }
+  let blob: Blob;
+  try {
+    const r = await fetch(`${INTERNAL_API_URL}${path}`, {
+      signal: AbortSignal.timeout(TG_CLIP_FETCH_TIMEOUT_MS),
+    });
+    if (!r.ok) {
+      log.warn({ status: r.status, path }, "snapshot fetch failed");
+      return null;
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.byteLength === 0) return null;
+    if (buf.byteLength > MAX_TG_PHOTO_BYTES) {
+      log.warn({ bytes: buf.byteLength }, "snapshot exceeds telegram photo limit");
+      return null;
+    }
+    blob = new Blob([new Uint8Array(buf)], { type: "image/jpeg" });
+  } catch (e) {
+    log.warn({ err: e }, "snapshot fetch error");
+    return null;
+  }
+  for (let attempt = 1; attempt <= TG_RETRIES; attempt++) {
+    try {
+      const fd = new FormData();
+      fd.set("chat_id", handle);
+      if (caption) fd.set("caption", caption);
+      if (replyMarkup) fd.set("reply_markup", JSON.stringify(replyMarkup));
+      fd.set("photo", blob, "snapshot.jpg");
+      const res = await fetch(`${API}/sendPhoto`, {
+        method: "POST",
+        body: fd,
+        signal: AbortSignal.timeout(TG_UPLOAD_TIMEOUT_MS),
+      });
+      if (res.ok) {
+        const j = (await res.json().catch(() => ({}))) as {
+          result?: { message_id?: number };
+        };
+        log.info(
+          { handle, message_id: j.result?.message_id, bytes: blob.size, attempt },
+          "snapshot delivered",
+        );
+        return j.result?.message_id ?? null;
+      }
+      const body = (await res.text()).slice(0, 200);
+      if (res.status < 500 && res.status !== 429) {
+        log.warn({ status: res.status, body }, "sendPhoto failed (no retry)");
+        return null;
+      }
+      log.warn({ status: res.status, body, attempt }, "sendPhoto transient");
+    } catch (e) {
+      log.warn({ err: (e as Error).message, attempt }, "sendPhoto error (retry)");
+    }
+    if (attempt < TG_RETRIES) await new Promise((r) => setTimeout(r, attempt * 2000));
+  }
+  log.warn({ handle }, "sendPhoto gave up after retries");
+  return null;
+}
+
+/**
+ * Upload snapshot photo(s); on total failure fall back to a text message
+ * (keeping the buttons) so the user always at least gets the live-view link.
+ */
+async function sendPhotos(
+  handle: string,
+  images: Array<{ url: string; caption?: string }>,
+  text: string,
+  buttons?: Array<{ text: string; url: string }>,
+): Promise<number[]> {
+  const batch = images.slice(0, 5);
+  const markup =
+    buttons && buttons.length > 0
+      ? { inline_keyboard: buttons.map((b) => [{ text: b.text, url: b.url }]) }
+      : undefined;
+  const ids: number[] = [];
+  for (let i = 0; i < batch.length; i++) {
+    const im = batch[i]!;
+    const caption =
+      i === 0 ? (im.caption ? `${text}\n${im.caption}` : text) : im.caption ?? "";
+    const isLast = i === batch.length - 1;
+    const mid = await sendPhotoFile(handle, im.url, caption, isLast ? markup : undefined);
+    if (mid != null) ids.push(mid);
+  }
+  if (ids.length === 0) {
+    const fid = await sendMessage(
+      handle,
+      `${text}\n(Live snapshot unavailable right now — use the live view link.)`,
+      buttons && buttons.length > 0 ? { buttons } : undefined,
+    );
+    if (fid != null) ids.push(fid);
+  }
+  return ids;
+}
+
 // ── Incident ↔ message tracking ─────────────────────────────────────────
 // Every message tied to an incident (clip/alert + the follow-up summary) is
 // recorded here so that resolving the incident via a button removes ALL of
@@ -753,6 +866,9 @@ async function main() {
     const videos = (event.attachments ?? [])
       .filter((a) => a.kind === "video" && a.url)
       .map((a) => ({ url: a.url, caption: a.caption }));
+    const images = (event.attachments ?? [])
+      .filter((a) => a.kind === "image" && a.url)
+      .map((a) => ({ url: a.url, caption: a.caption }));
     // Playback deep link arrives as a structured `link` attachment so it can
     // be rendered as an inline button (never inlined in the message text).
     const link =
@@ -787,6 +903,14 @@ async function main() {
         incidentId ?? undefined,
         link,
         withActions,
+      );
+    } else if (images.length > 0) {
+      // Live-view snapshot(s): photo + the "Open live view" button.
+      messageIds = await sendPhotos(
+        event.handle,
+        images,
+        event.text,
+        event.buttons,
       );
     } else {
       const id = await sendMessage(

@@ -134,6 +134,7 @@ async def consume_camera(camera_id: str, redis, minio) -> None:
         # at most one extra inference per camera per FIRE_INTERVAL_SECONDS.
         # Results merge into the same detections stream → overlay, DB and
         # incident-engine all see them with class "fire"/"smoke".
+        fire_present = False
         if fire_detector_singleton.enabled:
             now = asyncio.get_running_loop().time()
             if now - _last_fire.get(camera_id, 0.0) >= FIRE_INTERVAL_SECONDS:
@@ -143,6 +144,7 @@ async def consume_camera(camera_id: str, redis, minio) -> None:
                         fire_detector_singleton.detect, img, camera_id
                     )
                     if fire:
+                        fire_present = True
                         detections = list(detections) + fire
                         log.warning(
                             "fire/smoke detected",
@@ -154,25 +156,35 @@ async def consume_camera(camera_id: str, redis, minio) -> None:
                         "fire detect failed", camera_id=camera_id, error=str(e)
                     )
         ts = datetime.fromisoformat(event["ts"].replace("Z", "+00:00"))
+        payload = {
+            "type": "frame.detections",
+            "camera_id": camera_id,
+            "ts": ts.isoformat(),
+            "frame_id": event["frame_id"],
+            "detections": detections,
+        }
+        # Thread the retained frame's key so the engine can hand it to the
+        # fire-adjudication pipeline (the vision model needs the pixels;
+        # ordinary frames are deleted just below).
+        if fire_present:
+            payload["frame_key"] = storage_key
         await publish_event(
             redis,
             f"detections.{camera_id}",
-            {
-                "type": "frame.detections",
-                "camera_id": camera_id,
-                "ts": ts.isoformat(),
-                "frame_id": event["frame_id"],
-                "detections": detections,
-            },
+            payload,
             maxlen=DETECTIONS_STREAM_MAXLEN,
         )
         try:
             await persist_detections(camera_id, ts, event["frame_id"], detections)
         except Exception as e:
             log.warning("persist failed", camera_id=camera_id, error=str(e))
-        # Clean up frame in MinIO (lifecycle policy is the backstop).
-        with contextlib.suppress(Exception):
-            await asyncio.to_thread(minio.remove_object, BUCKETS["frames"], storage_key)
+        # Clean up frame in MinIO (lifecycle policy is the backstop). A frame
+        # carrying fire/smoke is RETAINED here — the fire-adjudication
+        # pipeline needs to show it to the vision model and owns its cleanup
+        # (cleanup-fire-frame); the bucket lifecycle policy still backstops it.
+        if not fire_present:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(minio.remove_object, BUCKETS["frames"], storage_key)
 
     # count=1: pull a single frame per read so the detector always works on
     # the freshest surviving entry (the frames stream is hard-capped, so older

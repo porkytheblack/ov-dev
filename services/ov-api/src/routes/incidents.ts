@@ -57,9 +57,29 @@ async function ensureIncidentFootage(
   sql: ReturnType<typeof postgres>,
   id: string,
 ): Promise<string | null> {
-  // `.h264` in the key: footage is now transcoded to H.264 (below). The
-  // version suffix bypasses any pre-existing HEVC `-c copy` build that iOS
-  // Safari can't decode (the old "black box / crossed-out play" on phones).
+  // 1. If the clip-builder already produced an incident clip for this
+  //    incident, prefer it. Those clips are H.264 (matching the ondemand
+  //    recipe) and live under the 90-day clip retention — they survive
+  //    segment expiry, while the ondemand-from-segments fallback below
+  //    cannot rebuild once SEGMENT_HARD_MAX_HOURS has passed.
+  try {
+    const existing = await sql<{ storage_key: string }[]>`
+      SELECT storage_key
+        FROM clips
+       WHERE incident_id = ${id}::uuid
+       ORDER BY (kind = 'incident') DESC, start_ts DESC
+       LIMIT 1
+    `;
+    if (existing[0]) return existing[0].storage_key;
+  } catch (e) {
+    // Don't fail the request because the preference lookup failed — fall
+    // through to the legacy build-from-segments path.
+    console.warn(`[footage] clip lookup failed for ${id}:`, (e as Error).message);
+  }
+
+  // 2. `.h264` in the key: footage is now transcoded to H.264 (below). The
+  //    version suffix bypasses any pre-existing HEVC `-c copy` build that iOS
+  //    Safari can't decode (the old "black box / crossed-out play" on phones).
   const cacheKey = `ondemand/${id}.h264.mp4`;
   try {
     await minio.statObject(BUCKETS.clips, cacheKey);

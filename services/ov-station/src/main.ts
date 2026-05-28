@@ -17,8 +17,8 @@ import {
   r2Configured,
   type Logger,
 } from "@overwatch/shared-ts";
-import { mimoConfigured } from "@overwatch/ai";
-import { ClipReady, CONSUMER_GROUP, STREAMS } from "@overwatch/schemas/events";
+import { visionConfigured, visionProvider } from "@overwatch/ai";
+import { ClipReady, CONSUMER_GROUP, FireReview, STREAMS } from "@overwatch/schemas/events";
 
 const log: Logger = makeLogger("ov-station");
 
@@ -27,14 +27,17 @@ const STATION_ENDPOINT = (
 ).replace(/\/+$/, "");
 const STATION_API_KEY = process.env.STATION_API_KEY ?? "";
 
-async function triggerVisionBroadcast(input: Record<string, unknown>): Promise<void> {
+async function triggerBroadcast(
+  broadcastName: string,
+  input: Record<string, unknown>,
+): Promise<void> {
   const res = await fetch(`${STATION_ENDPOINT}/api/v1/trigger-broadcast`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${STATION_API_KEY}`,
     },
-    body: JSON.stringify({ broadcastName: "analyze-incident-clip", input }),
+    body: JSON.stringify({ broadcastName, input }),
   });
   if (!res.ok) {
     throw new Error(`station ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -59,7 +62,7 @@ async function main() {
       return;
     }
     try {
-      await triggerVisionBroadcast({
+      await triggerBroadcast("analyze-incident-clip", {
         incident_id: event.incident_id,
         camera_id: event.camera_id,
         storage_key: event.storage_key,
@@ -71,6 +74,36 @@ async function main() {
     }
   });
 
+  // Fire below the engine's high-confidence bar: adjudicate with the vision
+  // model before alerting. station-kit's v1 API only exposes
+  // trigger-broadcast (no trigger-signal), so adjudication is a broadcast.
+  const fireConsumer = createGroupConsumer({
+    redis,
+    stream: STREAMS.fire_review,
+    group: CONSUMER_GROUP("ov-station-fire"),
+    consumer: `station-${process.env.HOSTNAME ?? "local"}`,
+    schema: FireReview,
+  });
+  void fireConsumer.consume(async (event) => {
+    if (event.type !== "fire.review") return;
+    if (!STATION_API_KEY) {
+      log.warn({ camera_id: event.camera_id }, "STATION_API_KEY unset; skipping fire adjudication");
+      return;
+    }
+    try {
+      await triggerBroadcast("adjudicate-fire", {
+        camera_id: event.camera_id,
+        classes: event.classes,
+        frame_key: event.frame_key,
+        confidence: event.confidence,
+        high_confidence: event.high_confidence,
+      });
+      log.info({ camera_id: event.camera_id }, "fire adjudication broadcast triggered");
+    } catch (e) {
+      log.error({ err: e, camera_id: event.camera_id }, "fire adjudication trigger failed");
+    }
+  });
+
   const app = new Hono();
   app.get("/health", (c) =>
     c.json({
@@ -78,7 +111,8 @@ async function main() {
       service: "ov-station",
       role: "redis-bridge",
       station_key_configured: STATION_API_KEY !== "",
-      mimo_vision_configured: mimoConfigured("vision"),
+      vision_provider: visionProvider(),
+      vision_configured: visionConfigured(),
       r2_configured: r2Configured(),
     }),
   );

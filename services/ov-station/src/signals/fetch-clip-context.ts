@@ -1,11 +1,12 @@
 /**
  * Root signal of the vision broadcast. Loads the incident / camera / ROI
  * context for a freshly-built incident clip and decides whether to analyse
- * it. Skips when the camera has VLM disabled or the Mimo vision model is
- * not configured — downstream nodes are guarded on `skip`.
+ * it. Skips when the camera has VLM disabled or the configured vision
+ * provider (MiMo or Gemini, picked by `VISION_PROVIDER`) has no API key —
+ * downstream nodes are guarded on `skip`.
  */
 import { signal, z } from "station-signal";
-import { mimoConfigured } from "@overwatch/ai";
+import { visionConfigured } from "@overwatch/ai";
 import { sql, log } from "../config.js";
 
 const Input = z.object({
@@ -80,8 +81,8 @@ export const fetchClipContext = signal("fetch-clip-context")
       prompt: "",
     };
 
-    if (!mimoConfigured("vision")) {
-      log.info({ incident_id: input.incident_id }, "mimo vision not configured; skipping analysis");
+    if (!visionConfigured()) {
+      log.info({ incident_id: input.incident_id }, "vision provider not configured; skipping analysis");
       return skipResult;
     }
 
@@ -111,11 +112,13 @@ export const fetchClipContext = signal("fetch-clip-context")
     const row = rows[0];
     if (!row) return skipResult;
     if (!row.vlm_enabled && !input.force) return skipResult;
-    // Auto path: only analyse genuine in-window incidents. The engine marks
-    // an incident 'suppressed' when it never met the ROI linger threshold
-    // (false alarm / out of the defined detection window). A manual
-    // dashboard trigger (force) overrides this.
-    if (row.status === "suppressed" && !input.force) return skipResult;
+    // NOTE: previously we also skipped `row.status === "suppressed"` here on
+    // the auto path. The operator wants a summary for every incident the
+    // engine opens — including ones it auto-suppressed because they didn't
+    // meet the linger threshold — so the review surface always has context
+    // about *why* the engine flagged something even when it later decided
+    // the activity was brief noise. The `vlm_enabled` gate above is the
+    // intentional opt-out (per-camera kill switch).
 
     const opened = row.opened_at ? new Date(row.opened_at) : null;
     const closed = row.closed_at ? new Date(row.closed_at) : null;

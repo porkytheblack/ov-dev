@@ -2,7 +2,7 @@ import { z } from "zod";
 import postgres from "postgres";
 import { humanWhen, publishEvent, type makeRedis } from "@overwatch/shared-ts";
 import { STREAMS } from "@overwatch/schemas/events";
-import { signDeepLink } from "./deep-link.js";
+import { signDeepLink, signLiveLink } from "./deep-link.js";
 
 export type ToolDeps = {
   sql: ReturnType<typeof postgres>;
@@ -466,10 +466,246 @@ export const send_action_buttons = (deps: ToolDeps) => ({
   },
 });
 
+// ── Tier-1 surveillance tools ────────────────────────────────────────────
+
+/** Resolve a camera by explicit id or fuzzy name. Returns null if none/ambiguous-unmatched. */
+async function resolveCamera(
+  deps: ToolDeps,
+  camera_id?: string,
+  camera_name?: string,
+): Promise<{ id: string; name: string; status: string; last_frame_at: string | null } | null> {
+  if (camera_id) {
+    const r = await deps.sql<any[]>`
+      SELECT id, name, status, last_frame_at FROM cameras WHERE id = ${camera_id}::uuid
+    `;
+    return r[0] ?? null;
+  }
+  if (camera_name && camera_name.trim() !== "") {
+    const r = await deps.sql<any[]>`
+      SELECT id, name, status, last_frame_at FROM cameras
+       WHERE name ILIKE ${"%" + camera_name.trim() + "%"}
+       ORDER BY (lower(name) = lower(${camera_name.trim()})) DESC, name
+       LIMIT 1
+    `;
+    return r[0] ?? null;
+  }
+  return null;
+}
+
+export const show_live_view = (deps: ToolDeps) => ({
+  name: "show_live_view",
+  description:
+    "Show the operator the LIVE view of a camera right now: sends the " +
+    "current camera snapshot to the chat plus a tappable button that opens " +
+    "the full live stream in the dashboard. Use whenever the user asks to " +
+    "see/show a camera live, \"what's happening at X now\", or similar. " +
+    "Identify the camera by camera_id or camera_name.",
+  inputSchema: z.object({
+    camera_id: z.string().uuid().optional(),
+    camera_name: z.string().optional(),
+  }),
+  async do(input: any) {
+    if (!deps.redis || !deps.handle) {
+      return { status: "error" as const, data: null, message: "messenger channel unavailable" };
+    }
+    const cam = await resolveCamera(deps, input.camera_id, input.camera_name);
+    if (!cam) {
+      return {
+        status: "error" as const,
+        data: null,
+        message: "camera not found — call list_cameras to see available cameras",
+      };
+    }
+    const apiBase = (deps.internalApiUrl ?? "http://ov-api:3001").replace(/\/+$/, "");
+    const snapshotUrl = `${apiBase}/api/cameras/${cam.id}/snapshot`;
+    // Signed-token live URL — same scheme as the incident playback deep
+    // link, so the messenger recipient can open it without a dashboard
+    // session (Telegram in-app webview has none, which is why the raw
+    // /cameras/:id URL used to crash on missing camera-API responses).
+    const liveUrl = signLiveLink(cam.id);
+    const lastSeen = cam.last_frame_at
+      ? `last frame ${humanWhen(cam.last_frame_at, OV_TIMEZONE)}`
+      : "no recent frames";
+    const text = `📷 ${cam.name} — ${cam.status} (${lastSeen})`;
+    const ch = deps.channel === "whatsapp" ? "whatsapp" : "telegram";
+    await publishEvent(deps.redis, STREAMS.bot_outbox(ch), {
+      type: "bot.outbox",
+      channel: ch,
+      handle: deps.handle,
+      text,
+      attachments: [{ kind: "image", url: snapshotUrl, caption: cam.name }],
+      buttons: [{ text: "🎥 Open live view", url: liveUrl }],
+    } as Record<string, unknown>);
+    return {
+      status: "success" as const,
+      data: {
+        camera: cam.name,
+        status: cam.status,
+        sent: true,
+        note: "Live snapshot + live-view button delivered to the chat.",
+      },
+    };
+  },
+});
+
+export const list_cameras = (deps: ToolDeps) => ({
+  name: "list_cameras",
+  description:
+    "List all cameras with their current status (online/offline/" +
+    "connecting), whether they're enabled, and how long since the last " +
+    "frame. Use to resolve a camera the user names, or to answer " +
+    "\"which cameras are up/down?\".",
+  inputSchema: z.object({}),
+  async do() {
+    const rows = await deps.sql<any[]>`
+      SELECT id, name, status, enabled, last_frame_at,
+             EXTRACT(EPOCH FROM (now() - last_frame_at))::int AS secs_since_frame
+        FROM cameras ORDER BY name
+    `;
+    return {
+      status: "success" as const,
+      data: {
+        count: rows.length,
+        cameras: rows.map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          enabled: c.enabled,
+          last_frame_at: c.last_frame_at,
+          seconds_since_last_frame: c.secs_since_frame,
+        })),
+      },
+    };
+  },
+});
+
+export const get_system_status = (deps: ToolDeps) => ({
+  name: "get_system_status",
+  description:
+    "Health snapshot of the whole surveillance system: cameras up/down, " +
+    "open incidents, subscriber count, whether detections are still " +
+    "flowing (freshness — stale means the detector/pipeline may be stuck), " +
+    "and reachability of the core services. Use for \"is everything " +
+    "working?\" or \"why am I not getting alerts?\".",
+  inputSchema: z.object({}),
+  async do() {
+    const [cams, openInc, subs, fresh, lastInc] = await Promise.all([
+      deps.sql<any[]>`SELECT status, count(*)::int n, sum((enabled)::int)::int en FROM cameras GROUP BY status`,
+      deps.sql<any[]>`SELECT count(*)::int n FROM incidents WHERE status = 'open'`,
+      deps.sql<any[]>`SELECT count(*)::int n FROM subscribers WHERE enabled = true`,
+      deps.sql<any[]>`SELECT max(ts) AS last_ts, count(DISTINCT camera_id)::int AS active_cams
+                         FROM detections WHERE ts > now() - interval '15 minutes'`,
+      deps.sql<any[]>`SELECT max(opened_at) AS last_opened FROM incidents`,
+    ]);
+    const services: Array<{ name: string; url: string }> = [
+      { name: "ov-api", url: "http://ov-api:3001/health" },
+      { name: "ov-incident-engine", url: "http://ov-incident-engine:8001/health" },
+      { name: "ov-detector", url: "http://ov-detector:8000/health" },
+      { name: "ov-notifier", url: "http://ov-notifier:8002/health" },
+      { name: "ov-station", url: "http://ov-station:8005/health" },
+    ];
+    const health = await Promise.all(
+      services.map(async (s) => {
+        try {
+          const r = await fetch(s.url, { signal: AbortSignal.timeout(2500) });
+          return { name: s.name, ok: r.ok };
+        } catch {
+          return { name: s.name, ok: false };
+        }
+      }),
+    );
+    const lastTs = fresh[0]?.last_ts ? new Date(fresh[0].last_ts) : null;
+    const detAgeSec = lastTs ? Math.round((Date.now() - lastTs.getTime()) / 1000) : null;
+    return {
+      status: "success" as const,
+      data: {
+        cameras_by_status: cams.map((r: any) => ({ status: r.status, count: r.n, enabled: r.en })),
+        open_incidents: openInc[0]?.n ?? 0,
+        active_subscribers: subs[0]?.n ?? 0,
+        detection: {
+          last_detection_at: fresh[0]?.last_ts ?? null,
+          seconds_since_last_detection: detAgeSec,
+          cameras_with_recent_detections: fresh[0]?.active_cams ?? 0,
+          // Heuristic: nothing in 15 min while cameras are enabled likely
+          // means the detector/ingestor or the engine is stalled.
+          flowing: detAgeSec != null && detAgeSec < 900,
+        },
+        last_incident_opened_at: lastInc[0]?.last_opened ?? null,
+        services: health,
+      },
+    };
+  },
+});
+
+export const query_activity = (deps: ToolDeps) => ({
+  name: "query_activity",
+  description:
+    "Query RAW detections (not just ROI incidents) over a time window — " +
+    "for questions like \"was anyone at the gate this afternoon?\" or " +
+    "\"how much vehicle activity on the driveway today?\". Returns counts, " +
+    "distinct tracks, first/last seen and average confidence grouped by " +
+    "camera and class. Defaults to the last 2 hours; max span 24h.",
+  inputSchema: z.object({
+    camera_id: z.string().uuid().optional(),
+    camera_name: z.string().optional(),
+    start: z.string().optional(),
+    end: z.string().optional(),
+    classes: z.array(z.string()).optional(),
+    limit: z.number().int().min(1).max(50).default(25),
+  }),
+  async do(input: any) {
+    const to = input.end ? new Date(input.end) : new Date();
+    let from = input.start
+      ? new Date(input.start)
+      : new Date(to.getTime() - 2 * 3600_000);
+    // Cap the span so the partitioned detections scan stays bounded.
+    if (to.getTime() - from.getTime() > 24 * 3600_000) {
+      from = new Date(to.getTime() - 24 * 3600_000);
+    }
+    let camId: string | undefined = input.camera_id;
+    if (!camId && input.camera_name) {
+      const cam = await resolveCamera(deps, undefined, input.camera_name);
+      if (!cam) {
+        return { status: "error" as const, data: null, message: "camera not found" };
+      }
+      camId = cam.id;
+    }
+    const rows = await deps.sql<any[]>`
+      SELECT c.name AS camera, d.class,
+             count(*)::int AS detections,
+             count(DISTINCT d.track_id)::int AS tracks,
+             min(d.ts) AS first_seen, max(d.ts) AS last_seen,
+             round(avg(d.confidence)::numeric, 2) AS avg_confidence
+        FROM detections d
+        JOIN cameras c ON c.id = d.camera_id
+       WHERE d.ts BETWEEN ${from} AND ${to}
+         ${camId ? deps.sql`AND d.camera_id = ${camId}::uuid` : deps.sql``}
+         ${input.classes && input.classes.length > 0
+           ? deps.sql`AND d.class = ANY(${input.classes as string[]}::text[])`
+           : deps.sql``}
+       GROUP BY c.name, d.class
+       ORDER BY detections DESC
+       LIMIT ${input.limit}
+    `;
+    return {
+      status: "success" as const,
+      data: {
+        from: from.toISOString(),
+        to: to.toISOString(),
+        groups: rows,
+        note:
+          rows.length === 0
+            ? "No detections in that window (nothing seen, or camera/class filter too narrow)."
+            : undefined,
+      },
+    };
+  },
+});
+
 export function buildToolset(deps: ToolDeps) {
   const messengerTools =
     (deps.channel === "telegram" || deps.channel === "whatsapp") && deps.redis
-      ? [send_incident_clips(deps), send_action_buttons(deps)]
+      ? [send_incident_clips(deps), send_action_buttons(deps), show_live_view(deps)]
       : [];
   return [
     ...messengerTools,
@@ -478,6 +714,9 @@ export function buildToolset(deps: ToolDeps) {
     get_incident_details(deps),
     get_compound_status(deps),
     get_camera_context(deps),
+    list_cameras(deps),
+    get_system_status(deps),
+    query_activity(deps),
     summarize_period(deps),
     summarize_day(deps),
     set_incident_status(deps),

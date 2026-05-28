@@ -25,7 +25,7 @@
 import { signal, z } from "station-signal";
 import { publishEvent } from "@overwatch/shared-ts";
 import { STREAMS } from "@overwatch/schemas/events";
-import { summarizeWithMimo } from "@overwatch/ai";
+import { summarizeVision } from "@overwatch/ai";
 import { sql, redis, log } from "../config.js";
 import { signCalendarLink } from "../deep-link.js";
 
@@ -318,7 +318,7 @@ async function runWindow(
     });
     let g: string | null = null;
     try {
-      g = await summarizeWithMimo(recapPrompt(kind, obs), {
+      g = await summarizeVision(recapPrompt(kind, obs), {
         system: RECAP_SYSTEM,
         // MiMo burns the budget on hidden reasoning before emitting the
         // visible answer — a tight cap yields empty content. Give it room

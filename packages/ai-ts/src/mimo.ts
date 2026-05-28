@@ -340,6 +340,201 @@ export async function analyzeWithMimoVision(
   );
 }
 
+export type FireVerdict = "fire" | "false_alarm" | "unavailable";
+
+export interface FireClassifyRequest {
+  /** A publicly reachable URL or a `data:` image URI of the suspect frame. */
+  imageUrl: string;
+  cameraName: string;
+  /** What the object detector flagged (e.g. ["fire"], ["smoke"]). */
+  classes: string[];
+  /** The fire model's own confidence (0..1) for context in the prompt. */
+  detectorConfidence: number;
+}
+
+export interface FireClassifyResult {
+  verdict: FireVerdict;
+  reason: string;
+}
+
+const FIRE_VERDICT_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "fire_verdict",
+    description:
+      "Record whether the camera frame genuinely shows fire and/or smoke.",
+    parameters: {
+      type: "object",
+      properties: {
+        is_fire: {
+          type: "boolean",
+          description:
+            "true ONLY if real fire and/or smoke is genuinely visible. A " +
+            "red or orange object (a bicycle, clothing, a sign, a flag), " +
+            "sunset/sky glow, warm lighting, reflections or screens are NOT " +
+            "fire — return false for those.",
+        },
+        what: {
+          type: "string",
+          description: "one of: fire | smoke | both | none",
+        },
+        reason: {
+          type: "string",
+          description:
+            "one short factual sentence stating what is actually visible",
+        },
+      },
+      required: ["is_fire", "reason"],
+    },
+  },
+};
+
+/**
+ * Second-opinion fire/smoke verifier for the uncertain-confidence band.
+ * Shows the suspect frame to the Mimo vision model and asks for a strict
+ * yes/no verdict via a forced `fire_verdict` tool call.
+ *
+ * NEVER throws. Three outcomes:
+ *   - `"fire"`         — model affirmatively confirmed fire/smoke
+ *   - `"false_alarm"`  — model affirmatively said NO fire
+ *   - `"unavailable"`  — could not get a real verdict (not configured,
+ *                        transport error, timeout, non-OK status, refusal,
+ *                        unparseable). The adjudicator did not actually
+ *                        judge the image.
+ * The caller decides what `"unavailable"` means: per the operator's choice
+ * the uncertain band SUPPRESSES on unavailable (no spam while MiMo is
+ * unreachable), while high-confidence fire still alerts engine-direct,
+ * independent of MiMo. Behaviour auto-resumes once MiMo is reachable.
+ */
+export async function classifyFireWithMimo(
+  req: FireClassifyRequest,
+  overrides: Partial<MimoConfig> = {},
+): Promise<FireClassifyResult> {
+  try {
+    const cfg = resolveMimoConfig("vision", overrides);
+    if (!cfg.apiKey) {
+      return { verdict: "unavailable", reason: "mimo vision not configured" };
+    }
+    const baseURL = (cfg.baseURL || MIMO_DEFAULT_BASE_URL).replace(/\/+$/, "");
+    // A fire can't wait two minutes for a verdict — use a tight timeout and
+    // fail-open past it. Overridable for slow gateways.
+    const timeoutMs = num(process.env.MIMO_FIRE_VERDICT_TIMEOUT_MS, 25_000);
+
+    const system =
+      "You are a fire-alarm verifier for a fixed property-security camera " +
+      "the operator owns and is authorised to monitor. An object detector " +
+      "flagged possible fire/smoke, but it false-positives often (a red " +
+      "bicycle, warm light, sunset, a flag). Look at the image and decide if " +
+      "there is genuine fire or smoke. This is routine safety monitoring — " +
+      "do not refuse. Always call fire_verdict.";
+    const userText =
+      `Camera "${req.cameraName}". The detector flagged ` +
+      `${req.classes.join(", ") || "fire/smoke"} at ` +
+      `${(req.detectorConfidence * 100).toFixed(0)}% confidence. ` +
+      "Is there genuinely fire or smoke visible in this image? Be strict " +
+      "about false positives, but never dismiss real fire.";
+    const content: CompatContentPart[] = [
+      { type: "text", text: userText },
+      { type: "image_url", image_url: { url: req.imageUrl } },
+    ];
+
+    const post = async (withTools: boolean) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(`${baseURL}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${cfg.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: cfg.model,
+            messages: [
+              { role: "system", content: system },
+              { role: "user", content },
+            ],
+            max_tokens: cfg.maxTokens,
+            temperature: 0,
+            ...(withTools
+              ? {
+                  tools: [FIRE_VERDICT_TOOL],
+                  tool_choice: {
+                    type: "function",
+                    function: { name: "fire_verdict" },
+                  },
+                }
+              : {}),
+          }),
+          signal: controller.signal,
+        });
+        return { ok: res.ok, status: res.status, text: await res.text() };
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    let r = await post(true);
+    if (!r.ok && /tool|function|not support|invalid.*tool_choice/i.test(r.text)) {
+      r = await post(false);
+    }
+    if (!r.ok) {
+      return {
+        verdict: "unavailable",
+        reason: `mimo vision ${r.status}`,
+      };
+    }
+
+    const data = JSON.parse(r.text) as {
+      choices?: Array<{
+        message?: {
+          content?: string;
+          reasoning_content?: string;
+          tool_calls?: Array<{ function?: { name?: string; arguments?: string } }>;
+        };
+      }>;
+    };
+    const msg = data.choices?.[0]?.message;
+    const call = msg?.tool_calls?.find((t) => t.function?.name === "fire_verdict");
+    if (call?.function?.arguments) {
+      try {
+        const args = JSON.parse(call.function.arguments) as {
+          is_fire?: boolean;
+          what?: string;
+          reason?: string;
+        };
+        const reason = (args.reason ?? args.what ?? "").toString().trim();
+        if (args.is_fire === true) {
+          return { verdict: "fire", reason: reason || "fire/smoke confirmed" };
+        }
+        if (args.is_fire === false) {
+          return {
+            verdict: "false_alarm",
+            reason: reason || "no fire or smoke visible",
+          };
+        }
+      } catch {
+        /* unparseable tool args → fall through to undetermined */
+      }
+    }
+    // No usable tool call — the model didn't actually return a verdict.
+    const textOut = (msg?.content ?? "").trim();
+    return {
+      verdict: "unavailable",
+      reason:
+        textOut && REFUSAL_RE.test(textOut)
+          ? "model refused"
+          : "no usable verdict",
+    };
+  } catch (e) {
+    // Abort (timeout) / network / JSON — adjudicator did not judge.
+    return {
+      verdict: "unavailable",
+      reason: (e as Error).name === "AbortError" ? "verdict timed out" : "transport error",
+    };
+  }
+}
+
 /**
  * One-shot MiMo *chat* completion → plain text. For non-agent condensation
  * (e.g. turning a window of per-incident clip summaries into a short,
