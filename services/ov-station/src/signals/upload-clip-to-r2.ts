@@ -7,6 +7,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { signal, z } from "station-signal";
 import {
   BUCKETS,
@@ -51,7 +52,16 @@ export const uploadClipToR2 = signal("upload-clip-to-r2")
 
     const work = mkdtempSync(join(tmpdir(), `ov-station-${input.incident_id}-`));
     try {
-      const clipKey = `${R2_INCIDENT_PREFIX}${input.incident_id}/clip.mp4`;
+      // Unique per-upload key. The R2 public URL is fronted by Cloudflare's CDN
+      // (edge-cached ~4h). With a deterministic per-incident key, re-analysing
+      // an incident re-uploaded a (now smaller) clip to the SAME URL but the CDN
+      // kept serving the STALE larger cached copy → analyze-clip got the old
+      // >30MB bytes and OpenRouter 413'd; likewise a swept/deleted object under
+      // a reused URL → "fetch failed". A fresh key per upload can never have a
+      // stale or deleted prior copy. cleanup-r2 deletes the exact key we return;
+      // r2-sweep reclaims any orphan under the prefix by age.
+      const token = randomUUID();
+      const clipKey = `${R2_INCIDENT_PREFIX}${input.incident_id}/${token}/clip.mp4`;
       const localClip = join(work, "clip.mp4");
       await minio.fGetObject(BUCKETS.clips, input.storage_key, localClip);
 
@@ -77,16 +87,16 @@ export const uploadClipToR2 = signal("upload-clip-to-r2")
           "clip re-encoded to fit analysis budget",
         );
       }
-      await r2PutFile(r2, clipKey, fitted.path, "video/mp4");
+      await r2PutFile(r2, clipKey, fitted.path, "video/mp4", "no-store");
 
       let posterKey: string | undefined;
       let posterUrl: string | undefined;
       if (input.poster_key) {
-        posterKey = `${R2_INCIDENT_PREFIX}${input.incident_id}/poster.jpg`;
+        posterKey = `${R2_INCIDENT_PREFIX}${input.incident_id}/${token}/poster.jpg`;
         const localPoster = join(work, "poster.jpg");
         try {
           await minio.fGetObject(BUCKETS.clips, input.poster_key, localPoster);
-          await r2PutFile(r2, posterKey, localPoster, "image/jpeg");
+          await r2PutFile(r2, posterKey, localPoster, "image/jpeg", "no-store");
           posterUrl = r2PublicUrl(posterKey);
         } catch (e) {
           log.warn({ err: e, incident_id: input.incident_id }, "poster upload failed; continuing without it");

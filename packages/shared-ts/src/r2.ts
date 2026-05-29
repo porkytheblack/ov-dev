@@ -60,8 +60,13 @@ export async function r2PutFile(
   key: string,
   localPath: string,
   contentType: string,
+  cacheControl?: string,
 ): Promise<void> {
-  await client.fPutObject(R2_BUCKET, key, localPath, { "Content-Type": contentType });
+  const meta: Record<string, string> = { "Content-Type": contentType };
+  // Analysis clips are transient and fetched once; setting `no-store` keeps
+  // Cloudflare's edge from caching them (the public URL is CDN-fronted).
+  if (cacheControl) meta["Cache-Control"] = cacheControl;
+  await client.fPutObject(R2_BUCKET, key, localPath, meta);
 }
 
 export async function r2Remove(client: Client, key: string): Promise<void> {
