@@ -382,24 +382,45 @@ export function makeIncidentRoutes(sql: ReturnType<typeof postgres>) {
     // could still be active. (The reap-stale-analysis signal is the catch-all
     // for incidents nobody is polling.)
     let summaryStatus = rows[0].summary_status;
-    if (summaryStatus === "pending" && !rows[0].summary) {
+    let summary = rows[0].summary;
+    if (summaryStatus === "pending" && !summary) {
       const runTerminal = run?.status === "failed" || run?.status === "completed";
       const staleMs = (Number(process.env.ANALYSIS_STALE_MINUTES ?? 15) || 15) * 60_000;
+      // No trigger timestamp → don't time-fail here; the recurring
+      // reap-stale-analysis signal (which ages off opened_at) is the backstop.
       const stale = triggeredAt
         ? Date.now() - new Date(triggeredAt).getTime() > staleMs
-        : true;
+        : false;
       if (runTerminal || stale) {
-        await sql`
+        // Race-safe convergence. A broadcast reports 'completed' only AFTER its
+        // write-summary node has committed summary_status='ready', but the
+        // summary_status read above happened BEFORE getBroadcastRun — the run
+        // can finish between the two reads. Only flip a row that is STILL
+        // pending; if write-summary won the race the guarded UPDATE matches
+        // nothing and we re-read the real ('ready') state, so a just-finished
+        // re-analysis never flashes a spurious 'failed' on the dashboard.
+        const flipped = await sql<{ ok: number }[]>`
           UPDATE incidents SET summary_status = 'failed'
-           WHERE id = ${id}::uuid AND summary_status = 'pending'
+           WHERE id = ${id}::uuid AND summary_status = 'pending' AND summary IS NULL
+          RETURNING 1 AS ok
         `;
-        summaryStatus = "failed";
+        if (flipped.length > 0) {
+          summaryStatus = "failed";
+        } else {
+          const fresh = await sql<{ summary_status: string; summary: string | null }[]>`
+            SELECT summary_status, summary FROM incidents WHERE id = ${id}::uuid
+          `;
+          if (fresh[0]) {
+            summaryStatus = fresh[0].summary_status;
+            summary = fresh[0].summary;
+          }
+        }
       }
     }
 
     return c.json({
       summary_status: summaryStatus,
-      summary: rows[0].summary,
+      summary,
       run: run ? { id: run.id, status: run.status } : null,
       triggered_at: triggeredAt ?? null,
     });
