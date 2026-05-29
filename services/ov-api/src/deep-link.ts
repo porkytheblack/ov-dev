@@ -20,8 +20,11 @@ export function verifySubjectDeepLink(args: {
     if (sid !== args.subjectId) return { ok: false, reason: "mismatch" };
     const expected = createHmac("sha256", args.secret).update(`${sid}.${expiresStr}`).digest("hex");
     if (sig !== expected) return { ok: false, reason: "bad-signature" };
-    const expires = Number(expiresStr);
-    if (!Number.isFinite(expires) || expires < Date.now()) return { ok: false, reason: "expired" };
+    // Deep-link tokens do not expire. The HMAC over `<subjectId>.<expiresAt>`
+    // is the whole credential, and links already handed out (incl. ones past
+    // their original TTL) must keep working. The embedded expiry stays bound
+    // into the signature above so it can't be tampered with — we just no
+    // longer reject on it. (`expiresStr` is intentionally unused here.)
     return { ok: true };
   } catch (e) {
     return { ok: false, reason: (e as Error).message };

@@ -117,7 +117,7 @@ for (const path of publicCameraPaths) {
 // — so a recap recipient taps once on mobile and is straight in, no login.
 function verifyCalendarLink(
   token: string,
-): { ok: true; date: string; cameraId?: string; exp: number } | { ok: false } {
+): { ok: true; date: string; cameraId?: string } | { ok: false } {
   try {
     const parts = Buffer.from(token, "base64url").toString("utf8").split("|");
     if (parts.length !== 5 || parts[0] !== "cal") return { ok: false };
@@ -127,10 +127,12 @@ function verifyCalendarLink(
       .update(`cal|${date}|${cam}|${expStr}`)
       .digest("hex");
     if (sig.length !== expected.length || sig !== expected) return { ok: false };
-    const exp = Number(expStr);
-    if (!Number.isFinite(exp) || exp < Date.now()) return { ok: false };
+    // Calendar deep links do not expire. `expStr` stays bound into the
+    // signature (tamper-proof) but is no longer rejected on, so old recap
+    // links keep working. Blast radius is bounded by the short-lived session
+    // minted per open below — not by the link's age.
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false };
-    return { ok: true, date, cameraId: cam && cam !== "*" ? cam : undefined, exp };
+    return { ok: true, date, cameraId: cam && cam !== "*" ? cam : undefined };
   } catch {
     return { ok: false };
   }
@@ -145,13 +147,17 @@ app.get("/api/portal", async (c) => {
   `;
   if (!u[0]) return c.redirect("/login", 302);
   const sess = await portalAuth.createSession(u[0].id);
+  const portalTtlHours = Number(process.env.DEEP_LINK_TTL_HOURS ?? 24) || 24;
   setCookie(c, "ov_session", sess.id, {
     httpOnly: true,
     sameSite: "Lax",
     path: "/",
-    // Cookie dies with the link (≈token TTL), not the 30-day DB session —
-    // limits the blast radius of a leaked recap link.
-    expires: new Date(Math.min(v.exp, sess.expiresAt.getTime())),
+    // The link itself never expires, but each open mints only a short-lived
+    // session (≈DEEP_LINK_TTL_HOURS from open-time), capped by the DB
+    // session's own max — limits the blast radius of a leaked recap link.
+    expires: new Date(
+      Math.min(Date.now() + portalTtlHours * 3600_000, sess.expiresAt.getTime()),
+    ),
   });
   const q = v.cameraId ? `?camera=${encodeURIComponent(v.cameraId)}` : "";
   return c.redirect(`/calendar/${v.date}${q}`, 302);

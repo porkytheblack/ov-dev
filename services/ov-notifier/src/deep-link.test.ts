@@ -9,6 +9,11 @@ describe("deep link", () => {
     const r = signDeepLink({ incidentId, secret, ttlHours: 1 });
     expect(verifyDeepLink({ incidentId, token: r.token, secret }).ok).toBe(true);
   });
+  it("accepts a token past its original TTL (links never expire)", () => {
+    // ttlHours negative → embedded expiry already in the past.
+    const r = signDeepLink({ incidentId, secret, ttlHours: -1 });
+    expect(verifyDeepLink({ incidentId, token: r.token, secret }).ok).toBe(true);
+  });
   it("detects mismatched incident", () => {
     const r = signDeepLink({ incidentId, secret, ttlHours: 1 });
     const v = verifyDeepLink({ incidentId: "00000000-0000-0000-0000-000000000000", token: r.token, secret });

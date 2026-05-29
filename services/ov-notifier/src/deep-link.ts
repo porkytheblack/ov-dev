@@ -36,9 +36,10 @@ export function verifyDeepLink(args: {
       .update(`${iid}.${expiresStr}`)
       .digest("hex");
     if (sig !== expected) return { ok: false, reason: "bad-signature" };
-    const expires = Number(expiresStr);
-    if (!Number.isFinite(expires) || expires < Date.now())
-      return { ok: false, reason: "expired" };
+    // Deep-link tokens do not expire — old links must keep working. The HMAC
+    // over `<incidentId>.<expiresAt>` is the credential; the embedded expiry
+    // stays signed (tamper-proof) but is no longer rejected on. (`expiresStr`
+    // is intentionally unused here.)
     return { ok: true };
   } catch (e) {
     return { ok: false, reason: (e as Error).message };
