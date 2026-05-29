@@ -370,11 +370,38 @@ export function makeIncidentRoutes(sql: ReturnType<typeof postgres>) {
     if (!rows[0]) return c.json({ error: "not found" }, 404);
     const runId: string | undefined = rows[0].metadata?.analysis?.broadcast_run_id;
     const run = runId ? await getBroadcastRun(runId) : null;
+    const triggeredAt: string | undefined = rows[0].metadata?.analysis?.triggered_at;
+
+    // Self-heal a stuck 'pending'. summary_status is only ever advanced to
+    // 'ready' by the write-summary node on success — there is no failure
+    // transition, and Station reconciles its own run row (timeout → failed)
+    // but never this field. So a broadcast that failed, was skipped under
+    // onFailure("continue"), or whose runner crashed leaves the incident
+    // "Analyzing…" forever. Converge it to 'failed' once the run reached a
+    // terminal state without a summary, or the trigger is older than any run
+    // could still be active. (The reap-stale-analysis signal is the catch-all
+    // for incidents nobody is polling.)
+    let summaryStatus = rows[0].summary_status;
+    if (summaryStatus === "pending" && !rows[0].summary) {
+      const runTerminal = run?.status === "failed" || run?.status === "completed";
+      const staleMs = (Number(process.env.ANALYSIS_STALE_MINUTES ?? 15) || 15) * 60_000;
+      const stale = triggeredAt
+        ? Date.now() - new Date(triggeredAt).getTime() > staleMs
+        : true;
+      if (runTerminal || stale) {
+        await sql`
+          UPDATE incidents SET summary_status = 'failed'
+           WHERE id = ${id}::uuid AND summary_status = 'pending'
+        `;
+        summaryStatus = "failed";
+      }
+    }
+
     return c.json({
-      summary_status: rows[0].summary_status,
+      summary_status: summaryStatus,
       summary: rows[0].summary,
       run: run ? { id: run.id, status: run.status } : null,
-      triggered_at: rows[0].metadata?.analysis?.triggered_at ?? null,
+      triggered_at: triggeredAt ?? null,
     });
   });
 
