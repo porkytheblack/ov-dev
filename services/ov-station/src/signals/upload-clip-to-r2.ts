@@ -17,7 +17,14 @@ import {
   r2PutFile,
   R2_INCIDENT_PREFIX,
 } from "@overwatch/shared-ts";
-import { log } from "../config.js";
+import {
+  log,
+  ANALYSIS_MAX_MB,
+  ANALYSIS_MAX_SECONDS,
+  ANALYSIS_MAX_HEIGHT,
+  ANALYSIS_FPS,
+} from "../config.js";
+import { fitVideoToBudget } from "../fit-video.js";
 
 const Input = z.object({
   incident_id: z.string(),
@@ -47,7 +54,30 @@ export const uploadClipToR2 = signal("upload-clip-to-r2")
       const clipKey = `${R2_INCIDENT_PREFIX}${input.incident_id}/clip.mp4`;
       const localClip = join(work, "clip.mp4");
       await minio.fGetObject(BUCKETS.clips, input.storage_key, localClip);
-      await r2PutFile(r2, clipKey, localClip, "video/mp4");
+
+      // Shrink to a budget the vision model can ingest. analyze-clip fetches
+      // this R2 object and base64-inlines it into the OpenRouter request, so an
+      // oversized clip blows the provider limit; fitVideoToBudget re-encodes it
+      // to fit (dropping audio + excess resolution/fps/duration). Stored MinIO
+      // clip — used for dashboard playback — is untouched; only this R2 copy is
+      // trimmed.
+      const fitted = await fitVideoToBudget(localClip, join(work, "clip-analysis.mp4"), {
+        maxBytes: ANALYSIS_MAX_MB * 1024 * 1024,
+        maxSeconds: ANALYSIS_MAX_SECONDS,
+        maxHeight: ANALYSIS_MAX_HEIGHT,
+        fps: ANALYSIS_FPS,
+      });
+      if (fitted.transcoded) {
+        log.info(
+          {
+            incident_id: input.incident_id,
+            src_mb: +(fitted.srcBytes / 1048576).toFixed(1),
+            out_mb: +(fitted.bytes / 1048576).toFixed(1),
+          },
+          "clip re-encoded to fit analysis budget",
+        );
+      }
+      await r2PutFile(r2, clipKey, fitted.path, "video/mp4");
 
       let posterKey: string | undefined;
       let posterUrl: string | undefined;

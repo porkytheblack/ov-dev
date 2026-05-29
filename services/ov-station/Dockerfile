@@ -19,6 +19,9 @@ COPY services/ov-station ./services/ov-station
 FROM node:20-alpine AS runtime
 WORKDIR /app
 RUN corepack enable
+# ffmpeg/ffprobe: upload-clip-to-r2 re-encodes each incident clip to fit the
+# vision model's payload budget before R2 upload (see src/fit-video.ts).
+RUN apk add --no-cache ffmpeg
 COPY --from=build /app /app
 WORKDIR /app/services/ov-station
 ENV NODE_ENV=production
