@@ -14,9 +14,9 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-mono",
 });
 
-const title = "Overwatch — AI Surveillance That Messages You";
+const title = "Overwatch — AI Security, Installed End to End";
 const description =
-  "Multi-camera AI surveillance. Connects to your cameras, watches the zones that matter, and messages you on WhatsApp or Telegram when it counts.";
+  "We install and provision AI-powered security: on-site control software, WhatsApp and Telegram alerting, and smart monitoring that watches every zone and reports only when it matters.";
 
 export const metadata: Metadata = {
   title,
@@ -24,6 +24,8 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://overwatch.app"),
   applicationName: "Overwatch",
   keywords: [
+    "security installation",
+    "CCTV installation",
     "AI surveillance",
     "multi-camera security",
     "real-time object detection",
@@ -48,7 +50,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#ffffff",
+  themeColor: "#080808",
   width: "device-width",
   initialScale: 1,
 };

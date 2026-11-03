@@ -4,11 +4,13 @@ import { useEffect, useState } from "react";
 import { Wordmark } from "./Wordmark";
 
 const links = [
-  { href: "#how", label: "How it works" },
-  { href: "#showcase", label: "Showcase" },
-  { href: "#features", label: "Features" },
-  { href: "#trust", label: "Trust" },
-];
+  ["Services", "#services"],
+  ["Scenarios", "#scenarios"],
+  ["Capabilities", "#capabilities"],
+  ["Process", "#process"],
+  ["Security", "#security"],
+  ["FAQ", "#faq"],
+] as const;
 
 export function Nav() {
   const [scrolled, setScrolled] = useState(false);
@@ -23,68 +25,72 @@ export function Nav() {
 
   return (
     <header
-      className={`fixed inset-x-0 top-0 z-50 transition-colors duration-200 ${
-        scrolled
-          ? "border-b border-border bg-white/85 backdrop-blur-md"
-          : "border-b border-transparent"
+      className={`fixed inset-x-0 top-0 z-50 border-b transition-colors duration-200 ${
+        scrolled || open
+          ? "border-border bg-bg/85 backdrop-blur-md"
+          : "border-transparent bg-transparent"
       }`}
     >
-      <nav className="container-ov flex h-16 items-center justify-between">
-        <a href="#top" aria-label="Overwatch home">
+      <nav className="container-ov flex h-16 items-center justify-between gap-6">
+        <a href="#top" aria-label="Overwatch home" className="shrink-0">
           <Wordmark size={22} />
         </a>
-        <div className="hidden items-center gap-8 md:flex">
-          {links.map((l) => (
-            <a
-              key={l.href}
-              href={l.href}
-              className="text-[14px] text-text-muted transition-colors duration-150 hover:text-text"
-            >
-              {l.label}
-            </a>
-          ))}
-        </div>
-        <div className="hidden md:flex">
-          <a href="#waitlist" className="btn-primary">
-            Join the waitlist
-          </a>
-        </div>
-        <button
-          className="flex h-10 w-10 items-center justify-center text-text md:hidden"
-          onClick={() => setOpen((v) => !v)}
-          aria-label="Toggle menu"
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <path
-              d={open ? "M6 6l12 12M18 6L6 18" : "M3 6h18M3 12h18M3 18h18"}
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-            />
-          </svg>
-        </button>
-      </nav>
-      {open && (
-        <div className="border-t border-border bg-white px-5 py-4 md:hidden">
-          <div className="flex flex-col gap-4">
-            {links.map((l) => (
+
+        <ul className="hidden items-center gap-7 lg:flex">
+          {links.map(([label, href]) => (
+            <li key={href}>
               <a
-                key={l.href}
-                href={l.href}
-                onClick={() => setOpen(false)}
-                className="text-[15px] text-text-muted"
+                href={href}
+                className="mono text-[12px] uppercase tracking-[0.1em] text-text-muted transition-colors duration-150 hover:text-text"
               >
-                {l.label}
+                {label}
               </a>
+            </li>
+          ))}
+        </ul>
+
+        <div className="flex items-center gap-2">
+          <a href="#contact" className="btn-primary hidden !h-10 !px-4 !text-[12px] sm:inline-flex">
+            Book a site survey
+          </a>
+          <button
+            type="button"
+            aria-label={open ? "Close menu" : "Open menu"}
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+            className="flex h-10 w-10 items-center justify-center border border-border-strong text-text lg:hidden"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              {open ? (
+                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.6" />
+              ) : (
+                <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="1.6" />
+              )}
+            </svg>
+          </button>
+        </div>
+      </nav>
+
+      {open && (
+        <div className="border-t border-border bg-bg lg:hidden">
+          <ul className="container-ov flex flex-col py-3">
+            {links.map(([label, href]) => (
+              <li key={href}>
+                <a
+                  href={href}
+                  onClick={() => setOpen(false)}
+                  className="mono flex h-12 items-center border-b border-border text-[13px] uppercase tracking-[0.1em] text-text-muted"
+                >
+                  {label}
+                </a>
+              </li>
             ))}
-            <a
-              href="#waitlist"
-              onClick={() => setOpen(false)}
-              className="btn-primary mt-1"
-            >
-              Join the waitlist
-            </a>
-          </div>
+            <li className="pt-4">
+              <a href="#contact" onClick={() => setOpen(false)} className="btn-primary w-full">
+                Book a site survey
+              </a>
+            </li>
+          </ul>
         </div>
       )}
     </header>

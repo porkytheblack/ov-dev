@@ -1,4 +1,4 @@
-type Scene = "gate" | "fire" | "driveway" | "perimeter";
+export type Scene = "gate" | "fire" | "driveway" | "perimeter" | "bay";
 
 type Box = {
   x: number;
@@ -210,6 +210,32 @@ function SceneArt({ scene }: { scene: Scene }) {
         </>
       )}
 
+      {scene === "bay" && (
+        <>
+          <rect x="0" y="40" width={W} height="110" fill="#0f141b" />
+          <rect x="0" y="36" width={W} height="6" fill="#161c25" />
+          {[30, 150, 270].map((dx, i) => (
+            <g key={dx}>
+              <rect x={dx} y="70" width="100" height="80" fill={i === 1 ? "#1a1f27" : "#121820"} />
+              {Array.from({ length: 9 }).map((_, k) => (
+                <rect key={k} x={dx} y={74 + k * 8.6} width="100" height="1.2" fill="#1f2630" />
+              ))}
+              <rect x={dx + 44} y="52" width="12" height="5" fill={i === 1 ? "#f5ad4a" : "#1c2027"} opacity={i === 1 ? 0.75 : 1} />
+            </g>
+          ))}
+          <polygon points="186,57 214,57 240,150 160,150" fill="#f5ad4a" opacity="0.05" />
+          {/* truck */}
+          <g transform="translate(150 98)">
+            <rect x="0" y="0" width="118" height="46" fill="#0a0d12" />
+            <rect x="118" y="14" width="40" height="32" fill="#0c1016" />
+            <rect x="126" y="18" width="22" height="12" fill="#1a2230" />
+            <circle cx="24" cy="48" r="8" fill="#05070a" />
+            <circle cx="96" cy="48" r="8" fill="#05070a" />
+            <circle cx="140" cy="48" r="8" fill="#05070a" />
+          </g>
+        </>
+      )}
+
       <rect width={W} height={H} fill={`url(#vig-${scene})`} />
       {/* IR-ish scanlines */}
       <rect
@@ -240,6 +266,7 @@ export function CameraFeed({
   tag = "INCIDENT",
   boxes,
   roi,
+  zone = "ROI · ZONE-A",
   className = "",
 }: {
   scene?: Scene;
@@ -248,6 +275,7 @@ export function CameraFeed({
   tag?: "LIVE" | "INCIDENT" | "REC";
   boxes?: Box[];
   roi?: string;
+  zone?: string;
   className?: string;
 }) {
   const defaultBoxes: Record<Scene, Box[]> = {
@@ -261,6 +289,7 @@ export function CameraFeed({
       { x: 138, y: 146, w: 30, h: 50, label: "person 0.88" },
     ],
     perimeter: [{ x: 186, y: 90, w: 46, h: 76, label: "person 0.90" }],
+    bay: [{ x: 146, y: 94, w: 166, h: 64, label: "truck 0.93" }],
   };
   const b = boxes ?? defaultBoxes[scene];
   const roiPoly =
@@ -271,6 +300,8 @@ export function CameraFeed({
         ? "150,70 270,70 270,176 150,176"
         : scene === "driveway"
           ? "110,140 360,140 392,210 96,210"
+          : scene === "bay"
+            ? "130,90 330,90 360,170 110,170"
           : "96,80 308,80 308,176 96,176");
 
   return (
@@ -381,7 +412,7 @@ export function CameraFeed({
         </div>
         <div className="flex items-end justify-between">
           <span className="mono rounded bg-black/55 px-1.5 py-0.5 text-[10px] tracking-[0.08em] text-white/85">
-            ROI · ZONE-A
+            {zone}
           </span>
           <span className="mono rounded bg-black/55 px-1.5 py-0.5 text-[10px] tracking-[0.08em] text-white/85">
             {time}

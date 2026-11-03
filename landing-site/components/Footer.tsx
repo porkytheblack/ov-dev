@@ -2,13 +2,14 @@ import { Wordmark } from "./Wordmark";
 
 export function Footer() {
   return (
-    <footer className="border-t border-border bg-surface-elev/50">
+    <footer className="border-t border-border bg-surface">
       <div className="container-ov flex flex-col gap-8 py-12 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-sm">
           <Wordmark size={22} />
           <p className="mt-4 text-[14px] leading-relaxed text-text-muted">
-            Overwatch is multi-camera AI surveillance that watches the zones
-            that matter and messages you the moment something&apos;s wrong.
+            Installed, provisioned and tuned AI security: on-site control
+            software, WhatsApp and Telegram alerting, and smart monitoring
+            that reports only when it matters.
           </p>
           <p className="mono mt-4 text-[12px] uppercase tracking-[0.12em] text-text-dim">
             Always watching, always ready.
@@ -24,18 +25,21 @@ export function Footer() {
         <div className="grid grid-cols-2 gap-x-14 gap-y-2 sm:grid-cols-3">
           {[
             {
-              h: "Product",
+              h: "Services",
               links: [
-                ["How it works", "/#how"],
-                ["Showcase", "/#showcase"],
-                ["Features", "/#features"],
+                ["Control software", "/#services"],
+                ["WhatsApp & Telegram", "/#services"],
+                ["Scenarios", "/#scenarios"],
+                ["Capabilities", "/#capabilities"],
               ],
             },
             {
               h: "Company",
               links: [
-                ["Trust", "/#trust"],
-                ["Join the waitlist", "/#waitlist"],
+                ["Process", "/#process"],
+                ["Security", "/#security"],
+                ["Engagements", "/#engagements"],
+                ["Book a site survey", "/#contact"],
               ],
             },
             {

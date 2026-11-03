@@ -4,29 +4,29 @@
 
 @layer base {
   :root {
-    /* Clean, warm-neutral light theme */
-    --bg: #ffffff;
-    --surface: #ffffff;
-    --surface-elev: #f7f6f3;
-    --border: #ebe9e4;
-    --border-strong: #d8d5cd;
+    /* Premium dark — follows the product brand spec (build-spec §0) */
+    --bg: #080808;
+    --surface: #0f0f0f;
+    --surface-elev: #161616;
+    --border: #222222;
+    --border-strong: #3a3a3a;
 
-    --text: #1a1917;
-    --text-muted: #5c5953;
-    --text-dim: #94908a;
+    --text: #ededed;
+    --text-muted: #a3a3a3;
+    --text-dim: #6b6b6b;
 
-    /* Amber accent, tuned for legibility on white */
-    --accent: #c9740a;
-    --accent-strong: #a85f06;
-    --accent-fill: #f5a623;
-    --accent-soft: #fdf3e3;
-    --accent-line: #ecca94;
+    /* Single accent: amber */
+    --accent: #f59e0b;
+    --accent-strong: #fbbf24;
+    --accent-fill: #f59e0b;
+    --accent-soft: rgba(245, 158, 11, 0.08);
+    --accent-line: rgba(245, 158, 11, 0.35);
 
-    --success: #0f8a5f;
-    --danger: #d6453d;
+    --success: #10b981;
+    --danger: #ef4444;
 
-    --on-accent: #1a1205;
-    --ring: rgba(201, 116, 10, 0.32);
+    --on-accent: #0a0703;
+    --ring: rgba(245, 158, 11, 0.4);
   }
 
   html {
@@ -108,7 +108,7 @@
   .btn-primary,
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-2 whitespace-nowrap
-           h-12 px-6 rounded-full mono uppercase tracking-[0.06em]
+           h-12 px-6 rounded-none mono uppercase tracking-[0.06em]
            text-[13px] font-medium border transition-colors duration-150
            select-none cursor-pointer
            focus-visible:outline-none focus-visible:ring-2
@@ -123,7 +123,6 @@
   }
   .btn-primary:hover {
     background: var(--accent-strong);
-    color: #fff;
   }
   .btn-ghost {
     @apply border-transparent bg-transparent text-text-muted
@@ -133,11 +132,55 @@
   .pill {
     @apply inline-flex items-center gap-1.5 mono uppercase
            tracking-[0.06em] text-[11px] leading-none px-2.5 h-7
-           rounded-full border whitespace-nowrap;
+           border whitespace-nowrap;
   }
 
   .card {
-    @apply bg-surface border border-border rounded-2xl;
+    @apply bg-surface border border-border;
+  }
+
+  /* Hairline engineering grid used behind hero / section bands */
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    background-size: 64px 64px;
+  }
+
+  /* Corner ticks — the "targeting reticle" framing used on panels */
+  .ticks {
+    position: relative;
+  }
+  .ticks::before,
+  .ticks::after {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    pointer-events: none;
+    border-color: var(--accent);
+  }
+  .ticks::before {
+    top: -1px;
+    left: -1px;
+    border-top: 1px solid;
+    border-left: 1px solid;
+  }
+  .ticks::after {
+    bottom: -1px;
+    right: -1px;
+    border-bottom: 1px solid;
+    border-right: 1px solid;
+  }
+
+  .select-chev {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23f59e0b' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+  }
+
+  .index {
+    @apply mono text-[11px] uppercase tracking-[0.16em] text-text-dim;
   }
 
   .hairline {
