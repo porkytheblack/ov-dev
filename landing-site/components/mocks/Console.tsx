@@ -7,7 +7,7 @@ type LogLine = { t: string; src: string; msg: string; level?: "accent" | "ok" | 
 
 const script: LogLine[] = [
   { t: "02:13:58", src: "detector", msg: "CAM-01 person conf=0.94 track=#118", level: "dim" },
-  { t: "02:14:02", src: "engine", msg: "track #118 entered ROI “Driveway”", level: "dim" },
+  { t: "02:14:02", src: "engine", msg: "track #118 entered ROI “Gate approach”", level: "dim" },
   { t: "02:14:07", src: "engine", msg: "linger 60s exceeded → INC-2041 OPEN", level: "accent" },
   { t: "02:14:11", src: "clips", msg: "INC-2041 clip 00:24 + poster rendered", level: "dim" },
   { t: "02:14:12", src: "notifier", msg: "→ WhatsApp ×3 · Telegram group ×1", level: "accent" },
@@ -102,7 +102,7 @@ export function Console() {
               camera="CAM-01 · FRONT GATE"
               time="02:14:12"
               tag="INCIDENT"
-              zone="ROI · DRIVEWAY"
+              zone="ROI · GATE APPROACH"
               className="!rounded-none !border-0"
             />
           </div>
@@ -122,7 +122,6 @@ export function Console() {
               camera="CAM-05 · BAY"
               time="02:14:12"
               tag="REC"
-              boxes={[]}
               zone="ROI · BAY"
               className="!rounded-none !border-0"
             />

@@ -4,26 +4,50 @@ import { LegalPage } from "@/components/LegalPage";
 export const metadata: Metadata = {
   title: "Data Processing Agreement — Overwatch",
   description:
-    "Standard-form Data Processing Agreement for the hosted Overwatch service, operated by Cradle Labs Limited.",
+    "Standard-form Data Processing Agreement for Overwatch installation, support, managed care and AI and messaging integrations provided by Cradle Labs Limited.",
 };
 
 export default function DpaPage() {
   return (
-    <LegalPage title="Data Processing Agreement" updated="18 May 2026">
+    <LegalPage title="Data Processing Agreement" updated="3 November 2026">
       <p>
         This Data Processing Agreement (the <strong>&quot;DPA&quot;</strong>) is
         entered into between <strong>Cradle Labs Limited</strong>
         (&quot;Cradle Labs&quot;, &quot;we&quot;, &quot;us&quot;,
         &quot;our&quot;) and the <strong>Customer</strong> identified in the
         applicable Order. It is the standard-form data processing agreement
-        referenced by the Cradle Labs <a href="/terms">Terms of Service</a>{" "}
-        (Section 4) and <a href="/privacy-policy">Privacy Policy</a> (Section
-        3), and forms part of and is incorporated into the Product Terms and the
-        applicable Order for the <strong>hosted / managed</strong> deployment
-        model of the Overwatch Service. It applies only where Cradle Labs
-        processes Customer Personal Data on the Customer&apos;s behalf in that
-        hosted model, and does not apply to the marketing website, the
-        waitlist, or the self-hosted / on-premises deployment model.
+        referred to in the Cradle Labs <a href="/terms">Terms of Service</a>{" "}
+        (Section 5) and <a href="/privacy-policy">Privacy Policy</a> (Section
+        6), and forms part of the Customer&apos;s Service Agreement.
+      </p>
+      <p>
+        It applies wherever Cradle Labs processes Customer Personal Data on the
+        Customer&apos;s behalf in connection with the Overwatch Service,
+        including when Cradle Labs:
+      </p>
+      <ul>
+        <li>
+          installs, commissions and tunes the Customer&apos;s system, including
+          viewing live and recorded footage on site or remotely;
+        </li>
+        <li>
+          provides remote support, maintenance or managed care;
+        </li>
+        <li>
+          operates AI analysis (of incident clips and frames) or the
+          conversational assistant through provider accounts that Cradle Labs
+          manages; or
+        </li>
+        <li>
+          operates the WhatsApp or Telegram integration through accounts that
+          Cradle Labs manages, or hosts any other component of the Overwatch
+          Service.
+        </li>
+      </ul>
+      <p>
+        It does not apply to personal data Cradle Labs processes as a
+        controller for its own business purposes, which is covered by the
+        Privacy Policy.
       </p>
 
       <h2>1. Definitions and interpretation</h2>
@@ -32,13 +56,15 @@ export default function DpaPage() {
       </p>
       <ul>
         <li>
-          <strong>&quot;Cradle Labs Limited&quot;</strong>,{" "}
           <strong>&quot;Customer&quot;</strong>,{" "}
           <strong>&quot;Overwatch Service&quot;</strong>,{" "}
-          <strong>&quot;Product Terms&quot;</strong> and{" "}
-          <strong>&quot;Order&quot;</strong> have the meanings given in the
-          Cradle Labs Terms of Service (Section 4) and are used consistently
-          with that document and the Privacy Policy (Section 3).
+          <strong>&quot;Overwatch Software&quot;</strong>,{" "}
+          <strong>&quot;Proposal&quot;</strong>,{" "}
+          <strong>&quot;Customer Terms&quot;</strong> and{" "}
+          <strong>&quot;Service Agreement&quot;</strong> have the meanings
+          given in the Cradle Labs Terms of Service (Section 2).{" "}
+          <strong>&quot;Order&quot;</strong> means the Proposal accepted under
+          the Customer&apos;s Service Agreement.
         </li>
         <li>
           <strong>&quot;controller&quot;</strong>,{" "}
@@ -70,20 +96,20 @@ export default function DpaPage() {
         <li>
           <strong>&quot;Customer Personal Data&quot;</strong> means personal
           data that Cradle Labs processes on behalf of the Customer under the
-          Product Terms, the Order and this DPA in connection with the hosted
+          Customer Terms, the Order and this DPA in connection with the
           Overwatch Service, as further described in Annex 1. It includes{" "}
           <strong>&quot;Footage&quot;</strong>, meaning the camera video and
-          image data (and any audio enabled by the Customer) ingested,
-          transmitted, processed or stored through the hosted Overwatch
-          Service, together with associated frames, timestamps, metadata and
+          image data (and any audio enabled by the Customer) accessed,
+          transmitted, processed or stored by Cradle Labs or its
+          Sub-processors in connection with the Overwatch Service, including
+          incident clips and frames sent for AI analysis, together with associated frames, timestamps, metadata and
           AI-derived detections and analytics relating to identified or
           identifiable individuals.
         </li>
         <li>
           <strong>&quot;Sub-processor&quot;</strong> means any third party
           engaged by Cradle Labs (or by another Sub-processor) to process
-          Customer Personal Data in connection with the hosted Overwatch
-          Service.
+          Customer Personal Data in connection with the Overwatch Service.
         </li>
         <li>
           <strong>&quot;Security Incident&quot;</strong> means a personal data
@@ -123,7 +149,7 @@ export default function DpaPage() {
         or inconsistency, the following order of precedence applies, in
         descending order: (a) the Standard Contractual Clauses, but only in
         respect of Restricted Transfers and only to the extent of the conflict;
-        (b) this DPA; (c) the Product Terms; and (d) the Order, except that the
+        (b) this DPA; (c) the Customer Terms; and (d) the Order, except that the
         Order prevails to the extent it records particulars this DPA expressly
         states are completed in the Order. This DPA prevails over the Product
         Terms on all data protection matters.
@@ -154,8 +180,8 @@ export default function DpaPage() {
       <p>
         <strong>2.3 Duration.</strong> This DPA applies for as long as Cradle
         Labs processes Customer Personal Data, which corresponds to the duration
-        of the Customer&apos;s use of the hosted Overwatch Service under the
-        Product Terms and the Order, subject to the survival provisions in
+        of the Customer&apos;s use of the Overwatch Service under the
+        Customer Terms and the Order, subject to the survival provisions in
         Clause 17.
       </p>
       <p>
@@ -183,12 +209,12 @@ export default function DpaPage() {
         Customer Personal Data only on the Customer&apos;s documented
         instructions, including with regard to Restricted Transfers, unless
         required to process by applicable law. The Customer&apos;s documented
-        instructions are constituted by the Product Terms, the Order, this DPA,
+        instructions are constituted by the Customer Terms, the Order, this DPA,
         and the Customer&apos;s documented configuration of and use of the
         Overwatch Service (including features, retention settings, integrations
         and any optional capabilities the Customer enables). Additional or
         alternative instructions must be agreed in writing and may be subject to
-        adjustment of fees or scope under the Product Terms.
+        adjustment of fees or scope under the Customer Terms.
       </p>
       <p>
         <strong>3.2 Lawful-instruction notice.</strong> Cradle Labs informs the
@@ -229,8 +255,8 @@ export default function DpaPage() {
         </li>
         <li>
           (c) where its configuration of the Overwatch Service involves special
-          category data or biometric data (including any facial recognition
-          functionality it enables), it is solely responsible for identifying
+          category data or biometric data (including through any additional
+          functionality it requests or integrates), it is solely responsible for identifying
           and maintaining a valid Article 9 condition, for any
           appropriate-policy document, and for carrying out any data protection
           impact assessment and prior consultation required by Articles 35 and
@@ -251,7 +277,7 @@ export default function DpaPage() {
       </ul>
       <p>
         <strong>4.2</strong> The allocation of responsibility in this Clause 4
-        is consistent with Section 4 of the Terms of Service and Section 3 of
+        is consistent with Section 9 of the Terms of Service and Section 6 of
         the Privacy Policy: the Customer carries responsibility for the
         lawfulness of the surveillance, and Cradle Labs carries the
         processor-side security and Sub-processor responsibilities set out in
@@ -309,7 +335,7 @@ export default function DpaPage() {
         to resolve any such objection. If the objection cannot reasonably be
         resolved, the Customer may, as its sole and exclusive remedy, terminate
         the affected part of the Overwatch Service in accordance with the
-        Product Terms.
+        Customer Terms.
       </p>
       <p>
         <strong>7.3 Flow-down.</strong> Cradle Labs imposes on each
@@ -362,7 +388,7 @@ export default function DpaPage() {
         <strong>8.3 Reasonable assistance.</strong> Assistance under this Clause
         8 that is materially burdensome or exceeds what is required by the Data
         Protection Laws may be provided on reasonable terms (including
-        reimbursement of reasonable costs) as agreed under the Product Terms.
+        reimbursement of reasonable costs) as agreed under the Customer Terms.
       </p>
 
       <h2>9. Personal data breach / Security Incident</h2>
@@ -455,7 +481,7 @@ export default function DpaPage() {
       </p>
       <p>
         <strong>11.5 Conflict.</strong> In the event of any conflict between the
-        Standard Contractual Clauses and this DPA or the Product Terms, the
+        Standard Contractual Clauses and this DPA or the Customer Terms, the
         Standard Contractual Clauses prevail in respect of Restricted Transfers
         and only to the extent of the conflict (consistent with Clause 1.3).
       </p>
@@ -495,12 +521,12 @@ export default function DpaPage() {
 
       <h2>13. Deletion or return</h2>
       <p>
-        <strong>13.1</strong> On expiry or termination of the hosted Overwatch
+        <strong>13.1</strong> On expiry or termination of the Overwatch
         Service (or, in respect of a defined data set, upon the Customer&apos;s
         written request), Cradle Labs, at the Customer&apos;s choice, deletes or
         returns all Customer Personal Data and Footage to the Customer, and
         deletes existing copies, within a reasonable period not exceeding the
-        period stated in the Product Terms or Order or, absent a stated period,
+        period stated in the Customer Terms or Order or, absent a stated period,
         ninety (90) days, save to the extent applicable law requires Cradle Labs
         to retain some or all of the Customer Personal Data, in which case
         Cradle Labs continues to protect it and processes it only as required by
@@ -514,6 +540,13 @@ export default function DpaPage() {
         <strong>13.3</strong> On the Customer&apos;s written request, Cradle
         Labs provides written certification that it has complied with this
         Clause 13.
+      </p>
+      <p>
+        <strong>13.4</strong> Footage stored on the Customer&apos;s on-site
+        server remains under the Customer&apos;s control and is not affected by
+        this Clause. On termination, Cradle Labs revokes its remote access and,
+        at the Customer&apos;s choice, transfers to the Customer, or closes,
+        any AI provider and messaging accounts it manages for the Customer.
       </p>
 
       <h2>14. Records of processing</h2>
@@ -529,16 +562,16 @@ export default function DpaPage() {
       <p>
         <strong>15.1 Single cap.</strong> Each party&apos;s liability arising
         out of or in connection with this DPA is subject to the exclusions,
-        limitations and aggregate liability cap set out in the Product Terms.
-        The Product Terms and this DPA are subject to a{" "}
+        limitations and aggregate liability cap set out in the Customer Terms.
+        The Customer Terms and this DPA are subject to a{" "}
         <strong>single, combined aggregate cap</strong>; the cap is not
         duplicated, multiplied or increased by the existence of this DPA, and
-        liability under this DPA and the Product Terms is aggregated for the
+        liability under this DPA and the Customer Terms is aggregated for the
         purpose of that cap.
       </p>
       <p>
         <strong>15.2 Non-excludable liability.</strong> Nothing in this DPA or
-        the Product Terms excludes or limits any liability that cannot lawfully
+        the Customer Terms excludes or limits any liability that cannot lawfully
         be excluded or limited.
       </p>
       <p>
@@ -556,18 +589,24 @@ export default function DpaPage() {
         insufficient lawful basis for the surveillance or processing, the
         Customer&apos;s failure to provide required notices or obtain required
         consents, or the Customer&apos;s breach of Clause 4, subject to any
-        limitations in the Product Terms that apply to such indemnity.
+        limitations in the Customer Terms that apply to such indemnity.
       </p>
 
       <h2>16. AI processing schedule</h2>
       <p>
-        <strong>16.1 Nature of AI processing.</strong> In the hosted Overwatch
-        Service, Footage and derived data are processed (including by forwarding
-        relevant video, frames or derived data to AI Sub-processors) to produce{" "}
-        <strong>probabilistic, assistive</strong> incident detections and scene
-        understanding. Such outputs are not guaranteed to be accurate, complete
-        or timely and are intended only to assist the Customer, consistent with
-        Section 4 of the Terms of Service.
+        <strong>16.1 Nature of AI processing.</strong> In the standard
+        configuration of the Overwatch Service, short incident clips and
+        selected still frames (not continuous recordings) are forwarded to AI
+        Sub-processors to produce incident summaries and to verify critical
+        events such as fire. Messages sent by the Customer&apos;s authorised
+        users to the conversational assistant, together with relevant incident
+        and camera data, are processed by an AI language-model Sub-processor.
+        Outputs are <strong>probabilistic and assistive</strong>, are not
+        guaranteed to be accurate, complete or timely, and are intended only to
+        assist the Customer, consistent with Section 10 of the Terms of
+        Service. Where the Order specifies the local AI configuration, incident
+        analysis runs on the Customer&apos;s own server and Footage is not
+        forwarded to AI Sub-processors.
       </p>
       <p>
         <strong>16.2 No training by Sub-processors.</strong> AI Sub-processors{" "}
@@ -608,7 +647,7 @@ export default function DpaPage() {
       <h2>17. Term, changes and survival</h2>
       <p>
         <strong>17.1 Term.</strong> This DPA takes effect on acceptance of the
-        Order for the hosted Overwatch Service and continues for as long as
+        Order for the Overwatch Service and continues for as long as
         Cradle Labs processes Customer Personal Data.
       </p>
       <p>
@@ -638,7 +677,7 @@ export default function DpaPage() {
       </p>
       <p>
         <strong>18.2 Entire agreement on processing.</strong> This DPA, together
-        with the Product Terms and the Order, constitutes the entire agreement
+        with the Customer Terms and the Order, constitutes the entire agreement
         between the parties regarding the processing of Customer Personal Data
         and supersedes any prior data processing terms on that subject matter.
       </p>
@@ -660,7 +699,7 @@ export default function DpaPage() {
         connection with it or its subject matter, is governed by and construed
         in accordance with the laws of{" "}
         <strong>the jurisdiction in which Cradle Labs Limited is incorporated</strong>
-        , consistent with the Product Terms, save that, in respect of Restricted
+        , consistent with the Customer Terms, save that, in respect of Restricted
         Transfers, the governing law and forum specified by or under the
         Standard Contractual Clauses prevail to the extent required by them.
       </p>
@@ -675,21 +714,22 @@ export default function DpaPage() {
       <h2>Annex 1 — Details of Processing</h2>
       <p>
         <strong>Subject-matter.</strong> The processing of Customer Personal
-        Data by Cradle Labs as processor in order to provide the hosted
-        Overwatch Service to the Customer.
+        Data by Cradle Labs as processor in order to provide the Overwatch Service to the Customer.
       </p>
       <p>
         <strong>Duration.</strong> For the duration of the Customer&apos;s use
-        of the hosted Overwatch Service under the Product Terms and the Order,
+        of the Overwatch Service under the Customer Terms and the Order,
         followed by deletion or return in accordance with Clause 13.
       </p>
       <p>
-        <strong>Nature and purpose.</strong> Capture, ingestion, transmission,
-        storage, organisation, analysis, forwarding to AI Sub-processors for
-        incident detection and scene understanding, generation of detections,
-        notifications and analytics, and related hosting, security, support and
-        service-operation activities, all to provide, maintain and support the
-        hosted Overwatch Service.
+        <strong>Nature and purpose.</strong> Viewing and configuring live and
+        recorded Footage during installation, commissioning and tuning;
+        remote access for support, maintenance and managed care; forwarding
+        incident clips, frames and assistant messages to AI Sub-processors for
+        incident summaries, verification and conversational answers; delivery
+        of alerts, clips and replies through messaging platforms; and related
+        security and service-operation activities, all to provide, maintain and
+        support the Overwatch Service.
       </p>
       <p>
         <strong>Types of personal data:</strong>
@@ -701,17 +741,25 @@ export default function DpaPage() {
           Timestamps and metadata associated with Footage (including device,
           camera and event metadata);
         </li>
-        <li>AI-derived detections and analytics (probabilistic, assistive outputs);</li>
+        <li>AI-derived detections, summaries and analytics (probabilistic, assistive outputs);</li>
+        <li>
+          Messages exchanged between authorised users and the conversational
+          assistant;
+        </li>
+        <li>
+          Phone numbers and Telegram identifiers of alert recipients nominated
+          by the Customer;
+        </li>
         <li>
           The Customer&apos;s authorised-user account and contact data (such as
           names, business contact details and credentials of users the Customer
           authorises);
         </li>
         <li>
-          Special category and/or biometric data (for example, where facial
-          recognition is configured) only if and to the extent configured or
-          enabled by the Customer, which is the Customer&apos;s responsibility
-          under Clause 4.
+          No special category or biometric data is intended to be processed.
+          The Overwatch Service does not perform facial recognition. Footage may
+          incidentally reveal special category information, for which the
+          Customer is responsible under Clause 4.
         </li>
       </ul>
       <p>
@@ -728,8 +776,11 @@ export default function DpaPage() {
         </li>
       </ul>
       <p>
-        <strong>Frequency of processing.</strong> Continuous, for the duration
-        of the hosted Overwatch Service.
+        <strong>Frequency of processing.</strong> Intermittent during
+        installation, commissioning, tuning and support; event-driven (on each
+        incident, assistant message or scheduled briefing) for AI processing
+        and notification delivery, for as long as the relevant integrations are
+        active.
       </p>
       <p>
         <strong>Controller and processor.</strong> Controller: the Customer, as
@@ -737,7 +788,7 @@ export default function DpaPage() {
         as described in Annex 3.
       </p>
       <p>
-        <strong>Retention.</strong> As set out in the Product Terms and the
+        <strong>Retention.</strong> As set out in the Customer Terms and the
         applicable Order (limited retention), with deletion or return on
         termination or expiry in accordance with Clause 13, save where retention
         is required by applicable law.
@@ -765,9 +816,10 @@ export default function DpaPage() {
           actions; timely revocation of access on role change or departure.
         </li>
         <li>
-          <strong>Tenant and data segregation:</strong> logical separation of
-          each Customer&apos;s data and environments to prevent unauthorised
-          access across tenants.
+          <strong>Segregation:</strong> each Customer&apos;s system runs on its
+          own on-site server; credentials, provider accounts and any hosted
+          components are logically separated per Customer to prevent access
+          across Customers.
         </li>
         <li>
           <strong>Network and infrastructure security:</strong> firewalls,
@@ -834,12 +886,14 @@ export default function DpaPage() {
       <ul>
         <li>
           (a) <strong>Cloud hosting, compute and storage infrastructure</strong>{" "}
-          providers for ingestion, processing and storage of Footage and related
-          data;
+          providers, only where a component of the Overwatch Service is hosted
+          by Cradle Labs;
         </li>
         <li>
           (b) <strong>Third-party AI/ML inference providers</strong> for
-          incident detection and scene understanding. These providers are
+          incident summaries, event verification and the conversational
+          assistant (not used where the local AI configuration applies). These
+          providers are
           contractually restricted from using Customer Personal Data (including
           Footage, frames or derived data) to train, fine-tune, develop or
           improve their own or any third party&apos;s models, products or
@@ -859,7 +913,11 @@ export default function DpaPage() {
         <li>
           (e) <strong>Operational tooling</strong> providers for logging,
           monitoring and error tracking used to operate and secure the Overwatch
-          Service.
+          Service;
+        </li>
+        <li>
+          (f) <strong>Remote access and support tooling</strong> used by
+          Cradle Labs personnel to support and maintain Customer systems.
         </li>
       </ul>
       <p>

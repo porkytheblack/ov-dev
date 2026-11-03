@@ -26,14 +26,14 @@ function ZoneEditor() {
   return (
     <div className="ticks border border-border-strong bg-surface" aria-hidden="true">
       <div className="flex h-9 items-center justify-between border-b border-border px-4">
-        <span className="index">CAM-01 · Front Gate · Zone editor</span>
+        <span className="index">CAM-02 · Driveway · Zone editor</span>
         <span className="mono text-[11px] text-success">● ONLINE</span>
       </div>
       <div className="grid md:grid-cols-[1.35fr_1fr]">
         <div className="flex flex-col border-b border-border md:border-b-0 md:border-r">
           <CameraFeed
-            scene="gate"
-            camera="CAM-01 · FRONT GATE"
+            scene="house"
+            camera="CAM-02 · DRIVEWAY"
             time="02:14:07"
             tag="LIVE"
             zone="ROI · DRIVEWAY"
@@ -44,7 +44,7 @@ function ZoneEditor() {
             <ul className="mono px-4 pb-3 pt-2 text-[11.5px]">
               {[
                 ["DRIVEWAY", "armed · 19:00–06:00", "text-accent"],
-                ["GATE-APPROACH", "armed · always", "text-accent"],
+                ["GARAGE", "armed · always", "text-accent"],
                 ["STREET", "ignored", "text-text-dim"],
               ].map(([z, st, c]) => (
                 <li key={z} className="flex items-center justify-between py-1">
@@ -61,7 +61,7 @@ function ZoneEditor() {
         <div className="flex flex-col">
           <div className="border-b border-border px-4 py-3">
             <p className="index !text-[10px]">Rule</p>
-            <p className="mt-1 text-[14px] text-text">After-hours presence at gate</p>
+            <p className="mt-1 text-[14px] text-text">After-hours presence in driveway</p>
           </div>
           <RuleRow k="Detect" v="person, vehicle" />
           <RuleRow k="Linger" v="≥ 60s" />
@@ -117,7 +117,7 @@ const pillars: Pillar[] = [
       "Incident alerts with clip, poster frame and playback link",
       "Ask questions in plain language: “anyone at the gate since 10?”",
       "Several recipients per zone: owner, manager, guard post",
-      "Short-lived signed links: playback never sits on a public URL",
+      "Signed playback links that expire on their own",
     ],
     visual: (
       <div className="flex justify-center">

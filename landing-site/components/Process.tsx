@@ -66,7 +66,29 @@ export function Process() {
           </Reveal>
         </div>
 
-        <ol className="mt-16 grid gap-px border border-border bg-border md:grid-cols-2 lg:grid-cols-3">
+        <Reveal delay={60}>
+          <figure className="relative mt-16 overflow-hidden border border-border">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/hardware.jpg"
+              alt="A security camera mounted on a brick wall"
+              loading="lazy"
+              className="block aspect-[16/9] w-full object-cover sm:aspect-[21/9]"
+            />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+            <figcaption className="absolute inset-x-0 bottom-0 flex flex-col gap-2 p-5 sm:flex-row sm:items-end sm:justify-between sm:p-7">
+              <p className="max-w-md text-[15px] leading-snug text-text sm:text-[17px]">
+                Professional-grade cameras, mounted, cabled and labelled by
+                our own engineers.
+              </p>
+              <p className="mono text-[11px] uppercase tracking-[0.12em] text-text-muted">
+                PoE · weather-rated · tamper-checked
+              </p>
+            </figcaption>
+          </figure>
+        </Reveal>
+
+        <ol className="mt-px grid gap-px border border-border bg-border md:grid-cols-2 lg:grid-cols-3">
           {steps.map((s, i) => (
             <Reveal key={s.n} as="li" delay={(i % 3) * 60} className="relative flex flex-col bg-bg p-7">
               <div className="flex items-baseline justify-between">

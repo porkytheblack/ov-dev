@@ -70,6 +70,7 @@ export function WaIncidentCard() {
         camera="CAM-01 · FRONT GATE"
         time="02:14:07"
         tag="INCIDENT"
+        zone="ROI · GATE APPROACH"
         className="!rounded-md"
       />
       <div className="px-1 pt-1.5 text-[12.5px] leading-snug">
@@ -78,13 +79,13 @@ export function WaIncidentCard() {
         </p>
         <p className="mt-1 text-[#111b21]">
           <span className="font-medium">person</span> detected in{" "}
-          <span className="font-medium">Driveway zone</span>
+          <span className="font-medium">Gate approach</span>
         </p>
         <p className="mono mt-1 text-[11px] text-[#667781]">
           Started 02:14 · lingered 64s
         </p>
         <p className="mt-1 text-[#3b4a54]">
-          One person entered the driveway and approached the gate. No vehicle.
+          One person walked up from the street and stopped at the gate. No vehicle.
         </p>
       </div>
       <div className="mt-1.5 flex items-center gap-2 rounded-md bg-[#f0f2f5] px-2.5 py-1.5">

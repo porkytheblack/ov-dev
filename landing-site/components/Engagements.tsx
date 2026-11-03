@@ -83,7 +83,7 @@ export function Engagements() {
             <p className="lead max-w-[34rem] lg:justify-self-end">
               Every property is different, so every engagement starts with a
               survey. You get a fixed quote covering hardware, installation,
-              provisioning and tuning. Your footage lives on your own
+              provisioning and tuning. Your recordings live on your own
               hardware, so there are no cloud storage fees.
             </p>
           </Reveal>

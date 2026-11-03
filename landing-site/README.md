@@ -14,8 +14,9 @@ stack or the pnpm monorepo).
 - Tailwind CSS — dark brand theme following `build-spec.md` §0 (single
   amber accent, sharp geometry, mono for data)
 - Inter + JetBrains Mono via `next/font` (fetched at build time)
-- Zero external image dependencies — every camera feed, phone mock and
-  chat UI is hand-built SVG/CSS, so it deploys with no asset pipeline
+- Camera feeds are real photographs graded to read as CCTV footage
+  (`public/feeds/`), with detection boxes and zones drawn as SVG on top;
+  phone and chat UIs are hand-built CSS
 
 ## Local development
 
@@ -52,14 +53,16 @@ The site is fully static/SSG. No backend, no secrets.
 - `/` — the landing page (hero console, services, interactive scenarios,
   capabilities, process, security architecture, engagements, FAQ,
   site-survey form)
-- `/terms` — Terms of Service (Cradle Labs Limited)
-- `/privacy-policy` — Privacy Policy (Cradle Labs Limited)
+- `/terms` — Terms of Service: site use, enquiries, surveys, quotes and the services framework
+- `/privacy-policy` — Privacy Policy, including how installed systems handle footage
+- `/dpa` — standard-form Data Processing Agreement for customers
 
-> The legal pages are templates with clearly bracketed placeholders
-> (`[DATE]`, `[Contact email: hello@ — confirm]`,
-> `[Registered address — confirm]`, `[Governing law … — confirm]`).
-> Fill these in and have them reviewed by a qualified lawyer before
-> launch.
+> The legal pages describe the standard architecture (on-site recording;
+> incident clips and assistant messages sent to third-party AI providers
+> unless the local AI configuration is used; alerts via Meta/Telegram). If
+> the default providers or architecture change, update `/privacy-policy`
+> §6, `/terms` §6 and `/dpa` §16 and Annex 3. Have them reviewed by a
+> qualified lawyer before relying on them.
 
 ## The scenarios section
 
@@ -98,3 +101,26 @@ landing-site/
         ├── TelegramChat.tsx   # Telegram UI + inline keyboard
         └── Typing.tsx         # agent typing indicator
 ```
+
+## Photography
+
+All photographs are from [Pexels](https://www.pexels.com) and used under the
+[Pexels License](https://www.pexels.com/license/) (free for commercial use,
+no attribution required). They were cropped to 16:9, desaturated, contrast-
+graded and given sensor grain to read as security footage; licence plates
+and a third-party trailer logo were blurred or cropped out.
+
+| File | Pexels photo |
+|---|---|
+| `public/feeds/gate.jpg` | https://www.pexels.com/photo/10135152/ |
+| `public/feeds/perimeter.jpg` | https://www.pexels.com/photo/17955862/ |
+| `public/feeds/driveway.jpg` | https://www.pexels.com/photo/18280830/ |
+| `public/feeds/bay.jpg` | https://www.pexels.com/photo/12689710/ |
+| `public/feeds/fire.jpg` | https://www.pexels.com/photo/35510319/ |
+| `public/feeds/house.jpg` | https://www.pexels.com/photo/186077/ |
+| `public/images/hardware.jpg` | https://www.pexels.com/photo/7463021/ |
+
+Detection-box coordinates for each feed live in
+`components/mocks/CameraFeed.tsx` (a 400×225 overlay space); update them if
+you swap a photo.
+

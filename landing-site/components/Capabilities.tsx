@@ -81,7 +81,7 @@ const caps: { k: string; title: string; body: string; icon: ReactNode }[] = [
   {
     k: "links",
     title: "Signed playback links",
-    body: "Alert links are short-lived and cryptographically signed, so playback never sits on a public URL.",
+    body: "Alert links are cryptographically signed and short-lived, so they can't be guessed and stop working once they expire.",
     icon: (
       <>
         <rect x="5" y="11" width="14" height="10" {...P} />
@@ -103,7 +103,7 @@ const caps: { k: string; title: string; body: string; icon: ReactNode }[] = [
   {
     k: "vlm",
     title: "On-prem AI summaries",
-    body: "Optional local vision-language model writes a one-line description of each incident without sending video to a cloud service.",
+    body: "Optional local vision model writes each incident summary on your own server, so no video is sent to a cloud AI service.",
     icon: (
       <>
         <rect x="6" y="6" width="12" height="12" {...P} />

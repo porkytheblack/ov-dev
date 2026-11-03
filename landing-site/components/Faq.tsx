@@ -7,7 +7,7 @@ const faqs = [
   },
   {
     q: "Does my footage leave the property?",
-    a: "No. Recording, detection and storage all happen on the server we install on-site. When an incident fires, only the alert leaves the building: a short clip, a poster frame and a signed, expiring playback link, sent to the people you name.",
+    a: "Your continuous recordings never do. Recording, detection and storage all happen on the server we install on-site. When an incident fires, a short clip and a few frames are sent to an AI vision service to write the summary, and the alert (clip, poster frame and a signed, expiring playback link) goes to the people you name on WhatsApp or Telegram. If nothing may leave the site, we can configure a fully local AI model instead.",
   },
   {
     q: "What happens if the internet or power goes down?",

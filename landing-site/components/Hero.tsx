@@ -54,9 +54,9 @@ export function Hero() {
         </Reveal>
 
         <Reveal delay={240}>
-          <ul className="mono mx-auto mt-10 flex max-w-3xl flex-wrap items-center justify-center gap-x-7 gap-y-2 text-[12px] uppercase tracking-[0.1em] text-text-dim">
+          <ul className="mono mx-auto mt-10 flex max-w-4xl flex-wrap items-center justify-center gap-x-7 gap-y-2 text-[12px] uppercase tracking-[0.1em] text-text-dim">
             {[
-              "Footage stays on-site",
+              "Recordings stay on-site",
               "Works with existing cameras",
               "Commissioned & tuned for you",
             ].map((t) => (

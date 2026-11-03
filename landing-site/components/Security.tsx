@@ -2,8 +2,8 @@ import { Reveal } from "./Reveal";
 
 const guarantees = [
   {
-    title: "Your footage stays on your hardware",
-    body: "Recordings, clips and frames are stored on the server we install on your premises. Nothing is uploaded to a video cloud.",
+    title: "Your recordings stay on your hardware",
+    body: "Continuous recordings, clips and frames are stored on the server we install on your premises. Only short incident clips are sent out, for AI analysis and to the people you alert.",
   },
   {
     title: "Cameras on an isolated network",
@@ -69,7 +69,7 @@ function Diagram() {
   const wire = { stroke: "var(--border-strong)", strokeWidth: 1, fill: "none" } as const;
   const hot = { stroke: "var(--accent)", strokeWidth: 1, fill: "none", strokeDasharray: "4 4" } as const;
   return (
-    <svg viewBox="0 0 680 380" className="block w-full" role="img" aria-label="Deployment topology: cameras on an isolated network feed an on-site Overwatch server, which serves the local console and sends alerts to WhatsApp and Telegram.">
+    <svg viewBox="0 0 680 380" className="block w-full" role="img" aria-label="Deployment topology: cameras on an isolated network feed an on-site Overwatch server, which serves the local console, sends incident clips for AI analysis, and sends alerts to WhatsApp and Telegram.">
       {/* premises boundary */}
       <rect x="10" y="20" width="420" height="340" fill="none" stroke="var(--border-strong)" strokeDasharray="2 4" />
       <text x="24" y="40" fontSize="10" fill="var(--text-dim)" fontFamily="var(--font-mono), monospace" letterSpacing="0.12em">
@@ -106,20 +106,23 @@ function Diagram() {
       <path d="M310 250 V290" {...wire} />
 
       {/* outbound */}
-      <path d="M410 180 H470 V92 H500" {...hot} />
-      <path d="M410 200 H500" {...hot} />
-      <path d="M410 220 H470 V308 H500" {...hot} />
+      <path d="M410 172 H462 V58 H500" {...hot} />
+      <path d="M410 190 H476 V146 H500" {...hot} />
+      <path d="M410 210 H476 V234 H500" {...hot} />
+      <path d="M410 228 H462 V322 H500" {...hot} />
 
-      <text x="434" y="168" fontSize="9" fill="var(--accent)" fontFamily="var(--font-mono), monospace" letterSpacing="0.1em">
+      <text x="420" y="164" fontSize="9" fill="var(--accent)" fontFamily="var(--font-mono), monospace" letterSpacing="0.1em">
         TLS
       </text>
 
-      <Node x={500} y={66} w={170} h={52} title="WhatsApp" sub="BUSINESS NUMBER" />
-      <Node x={500} y={174} w={170} h={52} title="Telegram" sub="PRIVATE BOT · GROUP" />
-      <Node x={500} y={282} w={170} h={52} title="Your phone" sub="SIGNED PLAYBACK" />
+      <Node x={500} y={32} w={170} h={52} title="AI analysis" sub="INCIDENT CLIPS ONLY" />
+      <Node x={500} y={120} w={170} h={52} title="WhatsApp" sub="BUSINESS NUMBER" />
+      <Node x={500} y={208} w={170} h={52} title="Telegram" sub="PRIVATE BOT · GROUP" />
+      <Node x={500} y={296} w={170} h={52} title="Your phone" sub="SIGNED PLAYBACK" />
 
-      <rect x="500" y="66" width="3" height="52" fill="#25D366" />
-      <rect x="500" y="174" width="3" height="52" fill="#2AABEE" />
+      <rect x="500" y="32" width="3" height="52" fill="var(--accent)" />
+      <rect x="500" y="120" width="3" height="52" fill="#25D366" />
+      <rect x="500" y="208" width="3" height="52" fill="#2AABEE" />
     </svg>
   );
 }
@@ -140,8 +143,8 @@ export function Security() {
               <p className="lead mt-5 max-w-[34rem]">
                 A security system you can&apos;t trust is a liability. Overwatch
                 runs on your premises, on hardware you own, behind a network
-                we design. Only the alert leaves the building, and only to the
-                people you name.
+                we design. Your recordings never leave the building, and alerts
+                go only to the people you name.
               </p>
             </Reveal>
           </div>

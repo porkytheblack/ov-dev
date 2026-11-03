@@ -86,17 +86,17 @@ const scenarios: Scenario[] = [
     tab: "Loitering",
     channel: "WhatsApp",
     title: "Someone waits at the gate too long.",
-    body: "Passers-by are ignored. Someone who stays in the driveway zone for more than 60 seconds after hours is not. The linger threshold filters out the noise, so the alerts you get are worth reading.",
+    body: "Passers-by are ignored. Someone who stays at the gate approach for more than 60 seconds after hours is not. The linger threshold filters out the noise, so the alerts you get are worth reading.",
     feed: {
       scene: "gate",
       camera: "CAM-01 · FRONT GATE",
       time: "02:14:07",
       tag: "INCIDENT",
-      zone: "ROI · DRIVEWAY",
+      zone: "ROI · GATE APPROACH",
     },
     steps: [
       { t: "02:13:03", label: "person detected · track #118" },
-      { t: "02:13:03", label: "entered DRIVEWAY zone · timer started" },
+      { t: "02:13:03", label: "entered GATE APPROACH · timer started" },
       { t: "02:14:07", label: "linger 64s ≥ 60s → INC-2041 OPEN" },
       { t: "02:14:11", label: "summary: “one person, no vehicle”" },
       { t: "02:14:12", label: "WhatsApp → 3 recipients" },
@@ -155,7 +155,7 @@ const scenarios: Scenario[] = [
       camera: "CAM-05 · LOADING BAY",
       time: "03:10:52",
       tag: "INCIDENT",
-      zone: "ROI · BAY-DOORS",
+      zone: "ROI · BAY DOORS",
     },
     steps: [
       { t: "03:10:41", label: "truck detected · conf 0.93" },
@@ -173,7 +173,7 @@ const scenarios: Scenario[] = [
               camera="CAM-05 · LOADING BAY"
               time="03:10:52"
               tag="INCIDENT"
-              zone="ROI · BAY-DOORS"
+              zone="ROI · BAY DOORS"
               className="!rounded-lg"
             />
             <div className="px-0.5 pt-1.5 text-[12.5px] leading-snug">
@@ -216,7 +216,7 @@ const scenarios: Scenario[] = [
           Did the delivery come today?
         </WaBubble>
         <WaBubble side="in" time="16:32">
-          Yes. A van stopped in the driveway at 14:06. One person carried a
+          Yes. A car pulled into the driveway at 14:06. One person carried a
           parcel to the door and left at 14:09. Here&apos;s the clip.
         </WaBubble>
         <WaBubble side="in" time="16:32" noPad>
@@ -243,12 +243,11 @@ const scenarios: Scenario[] = [
     title: "Last night, summarised by 06:30.",
     body: "Briefings are scheduled for whenever suits you. Each one covers incidents, activity per zone and camera health, so you don't have to scroll through the night's alerts.",
     feed: {
-      scene: "gate",
-      camera: "CAM-01 · FRONT GATE",
+      scene: "house",
+      camera: "CAM-02 · DRIVEWAY",
       time: "06:30:00",
       tag: "REC",
       zone: "ROI · DRIVEWAY",
-      boxes: [],
     },
     steps: [
       { t: "06:30:00", label: "schedule fired · overnight briefing" },
